@@ -428,16 +428,20 @@ function parseCommandInner(args: string[], flags: Flags): Command {
 
     // === Snapshot & Screenshot ===
     case 'snapshot': {
-      const markdown = rest.includes('--markdown') || rest.includes('-m');
       const interactive = rest.includes('--interactive') || rest.includes('-i');
-      const compact = rest.includes('--compact');
+      const compact = rest.includes('--compact') || rest.includes('-c');
+      const includeUrls = rest.includes('--urls') || rest.includes('-u');
+      const depthIdx = rest.findIndex((arg) => arg === '--depth' || arg === '-d');
       const maxDepthIdx = rest.findIndex((arg) => arg === '--max-depth');
       const selectorIdx = rest.findIndex((arg) => arg === '--selector' || arg === '-s');
       const cmd: Command = { id, action: 'snapshot' };
-      if (markdown) cmd.markdown = true;
       if (interactive) cmd.interactive = true;
       if (compact) cmd.compact = true;
-      if (maxDepthIdx !== -1 && maxDepthIdx + 1 < rest.length) {
+      if (includeUrls) cmd.urls = true;
+      if (depthIdx !== -1 && depthIdx + 1 < rest.length) {
+        cmd.maxDepth = parseInt(rest[depthIdx + 1], 10);
+      } else if (maxDepthIdx !== -1 && maxDepthIdx + 1 < rest.length) {
+        // Backward compatibility with previous claw-browser option name
         cmd.maxDepth = parseInt(rest[maxDepthIdx + 1], 10);
       }
       if (selectorIdx !== -1 && selectorIdx + 1 < rest.length) {

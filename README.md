@@ -27,10 +27,14 @@ pnpm run dev
 
 ```bash
 claw-browser open https://example.com
-claw-browser snapshot -i
+claw-browser snapshot -i -u
+claw-browser snapshot -s "#main" -d 4
 claw-browser click @e2
 claw-browser get title
 claw-browser tab list
+claw-browser site list
+claw-browser site update
+claw-browser site <adapter-name> [args...]
 claw-browser close
 ```
 

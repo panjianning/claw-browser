@@ -20,6 +20,7 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
   const maxDepth = cmd.maxDepth !== undefined ? Number(cmd.maxDepth) : undefined;
   const selector = cmd.selector;
   const interactive = cmd.interactive === true;
+  const urls = cmd.urls === true;
 
   try {
     state.refMap.clear();
@@ -32,6 +33,7 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
         depth: maxDepth,
         selector,
         interactive,
+        urls,
       }
     );
 
@@ -60,8 +62,8 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
       success: true,
       data: {
         snapshot: tree.tree,
+        origin: url,
         refs: tree.refs,
-        url,
       },
     };
   } catch (error: any) {

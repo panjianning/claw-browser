@@ -199,6 +199,11 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
     return;
   }
 
+  if (action === 'snapshot' && typeof data.snapshot === 'string') {
+    console.log(data.snapshot);
+    return;
+  }
+
   if (data && Object.keys(data).length > 0) {
     console.log(JSON.stringify(data, null, 2));
   }
@@ -670,7 +675,7 @@ async function main() {
     'snapshot', 'screenshot', 'pdf', 'get', 'is', 'find', 'wait', 'mouse',
     'cookies', 'storage', 'network', 'set',
     'tab', 'tabs', 'window', 'frame', 'dialog',
-    'state', 'eval', 'evaluate', 'close', 'quit', 'exit',
+    'state', 'eval', 'evaluate', 'site', 'close', 'quit', 'exit',
     'session', 'profiles'
   ].includes(possibleCommand);
 
@@ -709,6 +714,23 @@ async function main() {
   }
 
   try {
+    if (commandArgs[0] === 'site') {
+      const { runSiteCli } = await import('./cli/site.js');
+      await runSiteCli(commandArgs.slice(1), {
+        session,
+        jsonMode,
+        version: VERSION,
+        daemonOptions: {
+          headed: flags.headed || false,
+          debug: false,
+          cdp: flags.cdp,
+          profile: flags.profile,
+        },
+        tabId: flags.tabId,
+      });
+      return;
+    }
+
     const command = parseCommand(commandArgs, flags);
 
     // Ensure daemon is running
@@ -808,6 +830,7 @@ COMMANDS:
     snapshot                     Get accessibility tree
     screenshot [selector]        Take screenshot
     eval, evaluate <script>      Evaluate JavaScript in current page
+    site <subcommand>            Manage and run site adapters
 
   Tabs:
     tab                          List tabs (shows short id, tabId, and optional label)
@@ -835,6 +858,10 @@ EXAMPLES:
   claw-browser click "button[type='submit']"
   claw-browser snapshot
   claw-browser eval "location.href"
+  claw-browser snapshot -i -u
+  claw-browser snapshot -s "#main" -d 4
+  claw-browser site list
+  claw-browser site xhs/note --note_id 123
   claw-browser tab list
   claw-browser tab new --label docs https://agent-browser.dev
   claw-browser tab t2

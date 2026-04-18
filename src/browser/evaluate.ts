@@ -28,8 +28,16 @@ export async function handleEvaluate(cmd: any, state: DaemonState): Promise<any>
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const result = await mgr.evaluate(script);
-  return { id, success: true, data: { result } };
+  try {
+    const result = await mgr.evaluate(script);
+    return { id, success: true, data: { result } };
+  } catch (error: any) {
+    return {
+      id,
+      success: false,
+      error: `Evaluation error: ${error?.message || String(error)}`,
+    };
+  }
 }
 
 async function readStdin(): Promise<string> {

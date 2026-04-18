@@ -51,23 +51,6 @@ const CONTENT_ROLES = new Set([
   'paragraph',
 ]);
 
-const STRUCTURAL_ROLES = new Set([
-  'generic',
-  'group',
-  'list',
-  'table',
-  'row',
-  'rowgroup',
-  'navigation',
-  'main',
-  'complementary',
-  'banner',
-  'contentinfo',
-  'region',
-  'form',
-  'search',
-]);
-
 const INVISIBLE_CHARS = /[\u200B-\u200D\uFEFF]/g;
 
 // ========================================================================================
@@ -79,6 +62,7 @@ export interface SnapshotOptions {
   compact?: boolean;
   depth?: number;
   selector?: string;
+  urls?: boolean;
 }
 
 interface AXValue {
@@ -211,11 +195,16 @@ class RoleNameTracker {
 export async function takeSnapshot(
   client: CdpClient,
   sessionId: string,
-  iframeSessionsMap: Map<string, string>,
+  _iframeSessionsMap: Map<string, string>,
   options: SnapshotOptions = {}
 ): Promise<{ tree: string; refs: Record<string, { role: string; name: string; url?: string }> }> {
   const interactive = options.interactive ?? false;
   const compact = options.compact ?? false;
+  const includeUrls = options.urls ?? false;
+
+  const selectorBackendIds = options.selector
+    ? await resolveSelectorBackendIds(client, sessionId, options.selector)
+    : undefined;
 
   // Get accessibility tree from Chrome
   const axResult = (await client.sendCommand(
@@ -229,11 +218,15 @@ export async function takeSnapshot(
   // Build tree structure
   const [treeNodes, rootIndices] = buildTree(axNodes);
 
+  const effectiveRoots = selectorBackendIds
+    ? findEffectiveRoots(treeNodes, selectorBackendIds, options.selector || '')
+    : rootIndices;
+
   // Collect cursor-interactive elements
   const cursorElements = await collectCursorInteractiveElements(
     client,
     sessionId,
-    options.selector
+    selectorBackendIds
   );
 
   // Promote hidden inputs (labels wrapping display:none radio/checkbox)
@@ -246,7 +239,7 @@ export async function takeSnapshot(
     }
 
     // Resolve URL for links
-    if (node.role === 'link' && node.backendNodeId) {
+    if (includeUrls && node.role === 'link' && node.backendNodeId) {
       try {
         const result = await client.sendCommand(
           'DOM.resolveNode',
@@ -278,9 +271,7 @@ export async function takeSnapshot(
   // Track role:name for ref assignment
   const roleNameTracker = new RoleNameTracker();
   const refMap = new RefMap();
-
-  // Build dedup set for cursor-interactive elements
-  const dedupSet = new Set<string>();
+  let nextRef = 1;
 
   // Assign refs to interactive/content elements
   for (let i = 0; i < treeNodes.length; i++) {
@@ -300,17 +291,20 @@ export async function takeSnapshot(
       continue;
     }
 
-    const dupCount = roleNameTracker.track(node.role, node.name, i);
-    const refId = dupCount === 0 ? `e${i + 1}` : `e${i + 1}`;
+    roleNameTracker.track(node.role, node.name, i);
+    const refId = `e${nextRef++}`;
 
     node.hasRef = true;
     node.refId = refId;
 
     refMap.add(refId, node.backendNodeId, node.role, node.name, node.url);
+  }
 
-    // Add to dedup set
-    if (node.name.length > 0) {
-      dedupSet.add(node.name.toLowerCase());
+  // Build dedup set for cursor-interactive elements
+  const dedupSet = new Set<string>();
+  for (const [, entry] of refMap.entriesSorted()) {
+    if (entry.name.length > 0) {
+      dedupSet.add(entry.name.toLowerCase());
     }
   }
 
@@ -326,7 +320,7 @@ export async function takeSnapshot(
     }
 
     // Assign ref for unique cursor-interactive element
-    const refId = `e${treeNodes.indexOf(node) + 1}`;
+    const refId = `e${nextRef++}`;
     node.hasRef = true;
     node.refId = refId;
 
@@ -336,17 +330,25 @@ export async function takeSnapshot(
 
   // Render tree
   let output = '';
-  for (const rootIdx of rootIndices) {
+  for (const rootIdx of effectiveRoots) {
     output = renderTree(treeNodes, rootIdx, 0, output, options);
   }
 
   // Compact tree if needed
-  if (compact || interactive) {
+  if (compact) {
     output = compactTree(output, interactive);
   }
 
+  const trimmed = output.trim();
+  if (trimmed.length === 0) {
+    return {
+      tree: interactive ? '(no interactive elements)' : '(empty page)',
+      refs: refMap.toObject(),
+    };
+  }
+
   return {
-    tree: output,
+    tree: trimmed,
     refs: refMap.toObject(),
   };
 }
@@ -358,34 +360,8 @@ export async function takeSnapshot(
 async function collectCursorInteractiveElements(
   client: CdpClient,
   sessionId: string,
-  selector?: string
+  selectorBackendIds?: Set<number>
 ): Promise<Map<number, CursorElementInfo>> {
-  // Resolve selector to backendNodeIds if provided
-  let allowedBackendNodeIds: Set<number> | undefined;
-
-  if (selector) {
-    try {
-      const describeResult = await client.sendCommand(
-        'DOM.describeNode',
-        {
-          objectId: undefined,
-          backendNodeId: undefined,
-          depth: -1,
-          pierce: true,
-        },
-        sessionId
-      );
-
-      const node = (describeResult as any).node;
-      if (node) {
-        allowedBackendNodeIds = new Set<number>();
-        collectBackendNodeIds(node, allowedBackendNodeIds);
-      }
-    } catch {
-      // Selector resolution failed, continue without filter
-    }
-  }
-
   // JavaScript to scan all cursor-interactive elements
   const scanJs = `
 (function() {
@@ -458,23 +434,24 @@ async function collectCursorInteractiveElements(
 
   // Resolve backendNodeIds via querySelectorAll
   const idxToBackend = new Map<number, number>();
+  const doc = await client.sendCommand('DOM.getDocument', { depth: 0 }, sessionId);
+  const rootNodeId = (doc as any)?.root?.nodeId;
 
   for (let i = 0; i < elements.length; i++) {
+    if (!rootNodeId) {
+      break;
+    }
     try {
       const result = await client.sendCommand(
         'DOM.querySelector',
-        { nodeId: 1, selector: `[data-__ab-ci="${i}"]` },
+        { nodeId: rootNodeId, selector: `[data-__ab-ci="${i}"]` },
         sessionId
       );
       const nodeId = (result as any).nodeId;
 
       if (nodeId) {
-        const pushResult = await client.sendCommand(
-          'DOM.pushNodesByBackendIdsToFrontend',
-          { backendNodeIds: [nodeId] },
-          sessionId
-        );
-        const backendNodeId = (pushResult as any).nodeIds?.[0];
+        const describe = await client.sendCommand('DOM.describeNode', { nodeId }, sessionId);
+        const backendNodeId = (describe as any)?.node?.backendNodeId;
         if (backendNodeId) {
           idxToBackend.set(i, backendNodeId);
         }
@@ -518,7 +495,7 @@ async function collectCursorInteractiveElements(
     if (!backendNodeId) continue;
 
     // Filter by selector if provided
-    if (allowedBackendNodeIds && !allowedBackendNodeIds.has(backendNodeId)) {
+    if (selectorBackendIds && !selectorBackendIds.has(backendNodeId)) {
       continue;
     }
 
@@ -966,6 +943,72 @@ function collectBackendNodeIds(node: any, ids: Set<number>): void {
   if (node.contentDocument) {
     collectBackendNodeIds(node.contentDocument, ids);
   }
+}
+
+async function resolveSelectorBackendIds(
+  client: CdpClient,
+  sessionId: string,
+  selector: string
+): Promise<Set<number>> {
+  const evalResult = await client.sendCommand(
+    'Runtime.evaluate',
+    {
+      expression: `document.querySelector(${JSON.stringify(selector)})`,
+      returnByValue: false,
+      awaitPromise: false,
+    },
+    sessionId
+  );
+
+  const objectId = (evalResult as any)?.result?.objectId;
+  if (!objectId) {
+    throw new Error(`Selector '${selector}' did not match any element`);
+  }
+
+  const describe = await client.sendCommand(
+    'DOM.describeNode',
+    { objectId, depth: -1 },
+    sessionId
+  );
+  const rootNode = (describe as any)?.node;
+  if (!rootNode) {
+    throw new Error(`Could not resolve DOM node for selector '${selector}'`);
+  }
+
+  const ids = new Set<number>();
+  collectBackendNodeIds(rootNode, ids);
+  if (ids.size === 0) {
+    throw new Error(`Could not resolve backendNodeId for selector '${selector}'`);
+  }
+  return ids;
+}
+
+function findEffectiveRoots(
+  treeNodes: TreeNode[],
+  selectorBackendIds: Set<number>,
+  selector: string
+): number[] {
+  const inSubtree = treeNodes.map(
+    (node) => node.backendNodeId !== undefined && selectorBackendIds.has(node.backendNodeId)
+  );
+
+  const roots: number[] = [];
+  for (let idx = 0; idx < treeNodes.length; idx++) {
+    if (!inSubtree[idx]) {
+      continue;
+    }
+    const parentIdx = treeNodes[idx].parentIdx;
+    const parentInSubtree = parentIdx !== undefined ? inSubtree[parentIdx] : false;
+    if (!parentInSubtree) {
+      roots.push(idx);
+    }
+  }
+
+  if (roots.length === 0) {
+    throw new Error(`No accessibility node found for selector '${selector}'`);
+  }
+
+  return roots;
 }
 
 function createEmptyNode(): TreeNode {
