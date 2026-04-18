@@ -16,6 +16,27 @@ export interface Response {
   warning?: string;
 }
 
+export function listActiveSessions(): string[] {
+  const dir = getSocketDir();
+  let names: string[] = [];
+  try {
+    if (!fs.existsSync(dir)) {
+      return [];
+    }
+    const files = fs.readdirSync(dir);
+    names = files
+      .filter((f) => f.endsWith('.pid'))
+      .map((f) => f.slice(0, -4));
+  } catch {
+    return [];
+  }
+
+  // Keep deterministic output and only include sessions that still look active.
+  return names
+    .filter((name) => daemonReady(name))
+    .sort((a, b) => a.localeCompare(b));
+}
+
 /**
  * Get the base directory for socket/port files.
  * Priority: AGENT_BROWSER_SOCKET_DIR > XDG_RUNTIME_DIR > ~/.agent-browser > tmpdir

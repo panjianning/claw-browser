@@ -1,69 +1,45 @@
 # claw-browser
 
-Fast browser automation CLI for AI agents - TypeScript port of agent-browser.
+TypeScript migration of `agent-browser` (Rust) with CLI compatibility as the primary goal.
 
-## Status
+## Current focus
 
-This is a work-in-progress translation of the Rust agent-browser project to TypeScript. Currently implementing Phase 1: Foundation.
+- Keep command format compatible with `agent-browser` README
+- Support `--tab-id` for per-tab operations and concurrent workflows
+- Close migration gaps command-by-command
 
-### Completed
-
-- ✅ Project structure and configuration
-- ✅ Type definitions (CDP, commands, responses)
-- ✅ Command parsing module
-- ✅ IPC connection module (Unix socket + TCP)
-- ✅ CLI entry point
-
-### In Progress
-
-- 🚧 Daemon process implementation
-- 🚧 CDP client implementation
-- 🚧 Browser operations
-- 🚧 State management
-- 🚧 HTTP/WebSocket servers
+Migration tracker: [MIGRATION_STATUS.md](./MIGRATION_STATUS.md)
 
 ## Development
 
 ```bash
-# Install dependencies
-npm install
+# install
+pnpm install
 
-# Build
-npm run build
+# build
+pnpm run build
 
-# Development mode (watch)
-npm run dev
+# dev watch
+pnpm run dev
 ```
 
-## Usage
-
-Once complete, the CLI will work identically to the Rust version:
+## Quick usage
 
 ```bash
-# Start a session
-claw-browser start my-session
-
-# Send commands
-claw-browser my-session navigate https://example.com
-claw-browser my-session click "button[type='submit']"
-claw-browser my-session snapshot
-
-# Stop session
-claw-browser stop my-session
+claw-browser open https://example.com
+claw-browser snapshot -i
+claw-browser click @e2
+claw-browser get title
+claw-browser tab list
+claw-browser close
 ```
 
 ## Architecture
 
-The project follows the same architecture as the Rust version:
-
-1. **CLI Process** - Parses commands and connects to daemon via IPC
-2. **Daemon Process** - Long-running background process managing browser
-3. **CDP Client** - WebSocket client for Chrome DevTools Protocol
-4. **Browser Operations** - Command execution engine
-
-## Translation Progress
-
-See the [translation plan](../../.claude/plans/proud-tumbling-donut.md) for details.
+1. CLI process parses user commands and sends JSON RPC over local IPC
+2. Daemon process maintains browser/session/tab state
+3. CDP layer executes browser actions
+4. Browser modules implement command handlers and output shaping
 
 ## License
 

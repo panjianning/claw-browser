@@ -13,7 +13,7 @@ export async function handleWait(cmd: any, state: DaemonState): Promise<any> {
   }
 
   const sessionId = mgr.activeSessionId?.() || '';
-  const timeoutMs = state.timeoutMs || cmd.timeout || 30000;
+  const timeoutMs = state.timeoutMs(cmd);
 
   // Wait for text
   if (cmd.text && typeof cmd.text === 'string') {
@@ -82,7 +82,7 @@ export async function handleWaitForUrl(
   }
 
   const sessionId = mgr.activeSessionId?.() || '';
-  const timeoutMs = state.timeoutMs || cmd.timeout || 30000;
+  const timeoutMs = state.timeoutMs(cmd);
 
   await waitForUrl(mgr.client, sessionId, urlPattern, timeoutMs);
   const url = await mgr.getUrl().catch(() => '');
@@ -101,23 +101,13 @@ export async function handleWaitForLoadState(
 
   const loadState = cmd.state || 'load';
   const sessionId = mgr.activeSessionId?.() || '';
-  const timeoutMs = state.timeoutMs || cmd.timeout || 30000;
+  const timeoutMs = state.timeoutMs(cmd);
 
-  const waitUntil = loadState === 'commit' ? 'commit' : 'load';
-
-  // Wait with timeout
-  const timeoutPromise = new Promise((_, reject) =>
-    setTimeout(
-      () => reject(new Error(`Timeout waiting for load state: ${loadState}`)),
-      timeoutMs
-    )
-  );
-
+  const eventName = loadState === 'domcontentloaded'
+    ? 'Page.domContentEventFired'
+    : 'Page.loadEventFired';
   try {
-    await Promise.race([
-      mgr.waitForLifecycle?.(waitUntil, sessionId),
-      timeoutPromise,
-    ]);
+    await waitForEvent(mgr.client, sessionId, eventName, timeoutMs);
   } catch (error: any) {
     return { id, success: false, error: error.message || String(error) };
   }
@@ -141,7 +131,7 @@ export async function handleWaitForFunction(
   }
 
   const sessionId = mgr.activeSessionId?.() || '';
-  const timeoutMs = state.timeoutMs || cmd.timeout || 30000;
+  const timeoutMs = state.timeoutMs(cmd);
 
   await waitForFunction(mgr.client, sessionId, expression, timeoutMs);
 
@@ -174,7 +164,7 @@ export async function handleWaitForDownload(
   }
 
   const sessionId = mgr.activeSessionId?.() || '';
-  const timeoutMs = state.timeoutMs || cmd.timeout || 30000;
+  const timeoutMs = state.timeoutMs(cmd);
   const deadline = Date.now() + timeoutMs;
 
   return new Promise((resolve) => {
@@ -317,4 +307,32 @@ async function pollUntilTrue(
 
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
+}
+
+async function waitForEvent(
+  client: CdpClient,
+  sessionId: string,
+  eventName: string,
+  timeoutMs: number
+): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error(`Timeout waiting for ${eventName}`));
+    }, timeoutMs);
+
+    const handler = (_params: any, sid?: string) => {
+      if (!sid || sid === sessionId) {
+        cleanup();
+        resolve();
+      }
+    };
+
+    const cleanup = () => {
+      clearTimeout(timeout);
+      client.off(eventName, handler);
+    };
+
+    client.on(eventName, handler);
+  });
 }

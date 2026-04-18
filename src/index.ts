@@ -5,7 +5,7 @@ import type { Flags } from './types/commands.js';
 import { InvalidSessionNameError } from './types/commands.js';
 import * as connection from './connection/index.js';
 import { fileURLToPath } from 'url';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync } from 'fs';
 import { dirname, join } from 'path';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -86,16 +86,27 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
     for (let i = 0; i < tabs.length; i++) {
       const tab = tabs[i] || {};
       const marker = tab.active ? '→' : ' ';
-      const tabId = typeof tab.id === 'string' ? tab.id : '';
+      const tabId = typeof tab.tabId === 'string' ? tab.tabId : (typeof tab.id === 'string' ? tab.id : '');
+      const shortId = typeof tab.shortId === 'string' && tab.shortId.length > 0 ? tab.shortId : `t${i + 1}`;
+      const label = typeof tab.label === 'string' && tab.label.length > 0 ? tab.label : '';
       const title = typeof tab.title === 'string' && tab.title.length > 0 ? tab.title : 'Untitled';
       const url = typeof tab.url === 'string' ? tab.url : '';
-      console.log(`${marker} [${i}] ${tabId} ${title} - ${url}`);
+      const labelPart = label ? ` [${label}]` : '';
+      console.log(`${marker} ${shortId}${labelPart} ${tabId} ${title} - ${url}`);
     }
     return;
   }
 
-  if (action === 'tab_new' || action === 'newTab' || action === 'tab_switch' || action === 'switchTab') {
+  if (
+    action === 'tab_new' ||
+    action === 'newTab' ||
+    action === 'tab_switch' ||
+    action === 'switchTab' ||
+    action === 'window_new'
+  ) {
     const tabId = typeof data.tabId === 'string' ? data.tabId : '';
+    const shortId = typeof data.shortId === 'string' ? data.shortId : '';
+    const label = typeof data.label === 'string' ? data.label : '';
     const title = typeof data.title === 'string' ? data.title : '';
     const url = typeof data.url === 'string' ? data.url : '';
     if (tabId || title || url) {
@@ -105,11 +116,77 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
       if (url) {
         console.log(`  ${url}`);
       }
+      if (shortId) {
+        console.log(`  short: ${shortId}${label ? ` (${label})` : ''}`);
+      } else if (label) {
+        console.log(`  label: ${label}`);
+      }
       if (tabId) {
         console.log(`  tab: ${tabId}`);
       }
       return;
     }
+  }
+
+  if (action === 'title' && typeof data.title === 'string') {
+    console.log(data.title);
+    return;
+  }
+
+  if (action === 'url' && typeof data.url === 'string') {
+    console.log(data.url);
+    return;
+  }
+
+  if (action === 'cdp_url' && typeof data.cdpUrl === 'string') {
+    console.log(data.cdpUrl);
+    return;
+  }
+
+  if (action === 'gettext' && typeof data.text === 'string') {
+    console.log(data.text);
+    return;
+  }
+
+  if (action === 'innerhtml' && typeof data.html === 'string') {
+    console.log(data.html);
+    return;
+  }
+
+  if (action === 'inputvalue' && typeof data.value === 'string') {
+    console.log(data.value);
+    return;
+  }
+
+  if (action === 'getattribute') {
+    if (data.value === null || data.value === undefined) {
+      console.log('');
+    } else if (typeof data.value === 'string') {
+      console.log(data.value);
+    } else {
+      console.log(String(data.value));
+    }
+    return;
+  }
+
+  if (action === 'count' && typeof data.count === 'number') {
+    console.log(String(data.count));
+    return;
+  }
+
+  if (action === 'isvisible' && typeof data.visible === 'boolean') {
+    console.log(data.visible ? 'true' : 'false');
+    return;
+  }
+
+  if (action === 'isenabled' && typeof data.enabled === 'boolean') {
+    console.log(data.enabled ? 'true' : 'false');
+    return;
+  }
+
+  if (action === 'ischecked' && typeof data.checked === 'boolean') {
+    console.log(data.checked ? 'true' : 'false');
+    return;
   }
 
   if (action === 'evaluate' && Object.prototype.hasOwnProperty.call(data, 'result')) {
@@ -190,45 +267,88 @@ function parseCdpTarget(value: string): CdpTarget {
   return { cdpUrl: trimmed };
 }
 
-// Clean command-line arguments (remove flags)
-function cleanArgs(args: string[]): string[] {
-  const cleaned: string[] = [];
-  let i = 0;
-
-  // Flags that don't take a value (boolean flags)
-  const booleanFlags = ['--headed', '--annotate'];
-
-  while (i < args.length) {
-    const arg = args[i];
-
-    if (arg.startsWith('--')) {
-      // Check if it's a boolean flag
-      if (booleanFlags.includes(arg)) {
-        i++;
-        continue;
-      }
-      // Skip flag and its value if it has one
-      const nextArg = args[i + 1];
-      if (nextArg && !nextArg.startsWith('--')) {
-        i += 2;
-      } else {
-        i++;
-      }
-    } else if (arg.startsWith('-') && arg.length === 2) {
-      // Short flag, skip it and its value
-      i += 2;
-    } else {
-      cleaned.push(arg);
-      i++;
-    }
-  }
-
-  return cleaned;
+function getDefaultSession(flags: Flags): string {
+  const fromFlag = typeof flags.session === 'string' ? flags.session.trim() : '';
+  if (fromFlag.length > 0) return fromFlag;
+  const fromEnv = (process.env.AGENT_BROWSER_SESSION || '').trim();
+  if (fromEnv.length > 0) return fromEnv;
+  return 'default';
 }
 
-// Parse CLI flags from arguments
-function parseFlags(args: string[]): Flags {
+async function stopSession(session: string): Promise<boolean> {
+  let gracefulStopped = false;
+  if (connection.daemonReady(session)) {
+    try {
+      const closeResponse = await connection.sendCommand(
+        { id: `stop-${Date.now()}`, action: 'close' },
+        session
+      );
+      gracefulStopped = Boolean(closeResponse.success);
+    } catch {
+      // fall through
+    }
+  }
+  if (!gracefulStopped) {
+    await connection.forceStopDaemon(session);
+  }
+  connection.cleanupStaleFiles(session);
+  return gracefulStopped;
+}
+
+function getChromeUserDataDir(): string | null {
+  if (process.platform === 'win32') {
+    const local = process.env.LOCALAPPDATA;
+    if (!local) return null;
+    return join(local, 'Google', 'Chrome', 'User Data');
+  }
+  if (process.platform === 'darwin') {
+    const home = process.env.HOME;
+    if (!home) return null;
+    return join(home, 'Library', 'Application Support', 'Google', 'Chrome');
+  }
+  const home = process.env.HOME;
+  if (!home) return null;
+  return join(home, '.config', 'google-chrome');
+}
+
+function listChromeProfiles(): Array<{ dir: string; name: string }> {
+  const userDataDir = getChromeUserDataDir();
+  if (!userDataDir || !existsSync(userDataDir)) {
+    return [];
+  }
+
+  const localStatePath = join(userDataDir, 'Local State');
+  let nameMap = new Map<string, string>();
+  try {
+    const localState = JSON.parse(readFileSync(localStatePath, 'utf-8'));
+    const infoCache = localState?.profile?.info_cache || {};
+    nameMap = new Map<string, string>(
+      Object.entries(infoCache).map(([dir, info]: [string, any]) => [dir, info?.name || dir])
+    );
+  } catch {
+    // ignore
+  }
+
+  const entries: Array<{ dir: string; name: string }> = [];
+  try {
+    for (const entry of readdirSync(userDataDir, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue;
+      const dir = entry.name;
+      if (dir === 'Default' || /^Profile \d+$/i.test(dir)) {
+        entries.push({ dir, name: nameMap.get(dir) || dir });
+      }
+    }
+  } catch {
+    return [];
+  }
+
+  return entries.sort((a, b) => a.dir.localeCompare(b.dir));
+}
+
+// Parse global CLI flags and keep command-level flags in argv
+function parseFlags(args: string[]): { flags: Flags; cleanedArgs: string[] } {
   const flags: Flags = {};
+  const cleanedArgs: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -255,10 +375,20 @@ function parseFlags(args: string[]): Flags {
     } else if (arg === '--tab-id') {
       flags.tabId = args[i + 1];
       i++;
+    } else if (arg === '--session') {
+      flags.session = args[i + 1];
+      i++;
+    } else if (arg === '--profile') {
+      flags.profile = args[i + 1];
+      i++;
+    } else if (arg === '--json' || arg === '-j') {
+      flags.json = true;
+    } else {
+      cleanedArgs.push(arg);
     }
   }
 
-  return flags;
+  return { flags, cleanedArgs };
 }
 
 async function main() {
@@ -283,11 +413,11 @@ async function main() {
   }
 
   // Parse flags and clean args
-  const flags = parseFlags(args);
-  const cleanedArgs = cleanArgs(args);
+  const { flags, cleanedArgs } = parseFlags(args);
+  const defaultSession = getDefaultSession(flags);
 
   // JSON output mode
-  const jsonMode = flags.cliAnnotate || process.env.AGENT_BROWSER_JSON === '1';
+  const jsonMode = flags.json || process.env.AGENT_BROWSER_JSON === '1';
 
   // Handle built-in commands
   if (cleanedArgs.length === 0 || cleanedArgs[0] === 'help' || cleanedArgs[0] === '--help' || cleanedArgs[0] === '-h') {
@@ -306,7 +436,7 @@ async function main() {
 
   if (cleanedArgs[0] === 'start') {
     // Start daemon session
-    const session = cleanedArgs[1] || 'default';
+    const session = cleanedArgs[1] || defaultSession;
 
     if (!isValidSessionName(session)) {
       if (jsonMode) {
@@ -324,6 +454,7 @@ async function main() {
       const opts: connection.DaemonOptions = {
         headed: flags.headed || false,
         debug: process.env.AGENT_BROWSER_DEBUG === '1',
+        profile: flags.profile,
       };
 
       // Parse proxy if provided
@@ -362,7 +493,7 @@ async function main() {
 
   if (cleanedArgs[0] === 'stop') {
     // Stop daemon session
-    const session = cleanedArgs[1] || 'default';
+    const session = cleanedArgs[1] || defaultSession;
 
     if (!isValidSessionName(session)) {
       if (jsonMode) {
@@ -377,31 +508,7 @@ async function main() {
     }
 
     try {
-      let gracefulStopped = false;
-
-      // Try graceful shutdown first so browser processes can close cleanly.
-      if (connection.daemonReady(session)) {
-        try {
-          const closeResponse = await connection.sendCommand(
-            {
-              id: `stop-${Date.now()}`,
-              action: 'close',
-            },
-            session
-          );
-          gracefulStopped = Boolean(closeResponse.success);
-        } catch {
-          // Fall through to force-stop path.
-        }
-      }
-
-      // If graceful close didn't work, force-stop daemon using PID fallback.
-      if (!gracefulStopped) {
-        await connection.forceStopDaemon(session);
-      }
-
-      // Always remove stale metadata files.
-      connection.cleanupStaleFiles(session);
+      const gracefulStopped = await stopSession(session);
 
       if (jsonMode) {
         printJsonValue({ success: true, session, graceful: gracefulStopped });
@@ -421,7 +528,7 @@ async function main() {
 
   if (cleanedArgs[0] === 'connect') {
     const cdpArg = cleanedArgs[1];
-    const session = cleanedArgs[2] || 'default';
+    const session = cleanedArgs[2] || defaultSession;
 
     if (!cdpArg) {
       if (jsonMode) {
@@ -450,6 +557,7 @@ async function main() {
         headed: flags.headed || false,
         debug: process.env.AGENT_BROWSER_DEBUG === '1',
         cdp: cdpArg,
+        profile: flags.profile,
       };
 
       const daemonResult = await connection.ensureDaemon(session, opts, VERSION);
@@ -505,20 +613,73 @@ async function main() {
     return;
   }
 
+  if (cleanedArgs[0] === 'session') {
+    const sub = cleanedArgs[1];
+    if (!sub) {
+      if (jsonMode) {
+        printJsonValue({ success: true, session: defaultSession });
+      } else {
+        console.log(defaultSession);
+      }
+      return;
+    }
+    if (sub === 'list') {
+      const sessions = connection.listActiveSessions();
+      if (jsonMode) {
+        printJsonValue({ success: true, activeSessions: sessions, currentSession: defaultSession });
+      } else {
+        console.log('Active sessions:');
+        for (const s of sessions) {
+          const marker = s === defaultSession ? '->' : '  ';
+          console.log(`${marker} ${s}`);
+        }
+      }
+      return;
+    }
+    if (jsonMode) {
+      printJsonError('Unknown session subcommand. Use: session [list]');
+    } else {
+      console.error('Unknown session subcommand. Use: session [list]');
+    }
+    process.exit(1);
+  }
+
+  if (cleanedArgs[0] === 'profiles') {
+    const profiles = listChromeProfiles();
+    if (jsonMode) {
+      printJsonValue({ success: true, profiles });
+    } else {
+      if (profiles.length === 0) {
+        console.log('No Chrome profiles found.');
+      } else {
+        for (const p of profiles) {
+          console.log(`${p.dir}\t${p.name}`);
+        }
+      }
+    }
+    return;
+  }
+
   // Detect if first arg is a session name or a command
   // If it's a valid command, use default session
   const possibleCommand = cleanedArgs[0];
-  const isCommand = ['navigate', 'open', 'goto', 'back', 'forward', 'reload',
-                     'click', 'fill', 'type', 'hover', 'snapshot', 'screenshot',
-                     'close', 'cookies', 'storage', 'network', 'tab', 'tabs',
-                     'eval', 'evaluate', 'wait', 'scroll'].includes(possibleCommand);
+  const isCommand = [
+    'navigate', 'open', 'goto', 'back', 'forward', 'reload',
+    'click', 'dblclick', 'focus', 'fill', 'type', 'setvalue', 'press', 'key', 'keyboard', 'keydown', 'keyup',
+    'hover', 'select', 'check', 'uncheck', 'scroll', 'scrollintoview', 'scrollinto', 'drag', 'upload',
+    'snapshot', 'screenshot', 'pdf', 'get', 'is', 'find', 'wait', 'mouse',
+    'cookies', 'storage', 'network', 'set',
+    'tab', 'tabs', 'window', 'frame', 'dialog',
+    'state', 'eval', 'evaluate', 'close', 'quit', 'exit',
+    'session', 'profiles'
+  ].includes(possibleCommand);
 
   let session: string;
   let commandArgs: string[];
 
   if (isCommand) {
     // Direct command mode: claw-browser open example.com
-    session = 'default';
+    session = defaultSession;
     commandArgs = cleanedArgs;
   } else {
     // Session mode: claw-browser my-session open example.com
@@ -555,7 +716,32 @@ async function main() {
       headed: flags.headed || false,
       debug: false,
       cdp: flags.cdp,
+      profile: flags.profile,
     };
+    if (command.action === 'close_all') {
+      const active = connection.listActiveSessions();
+      const results: Array<{ session: string; success: boolean; error?: string }> = [];
+      for (const s of active) {
+        try {
+          await stopSession(s);
+          results.push({ session: s, success: true });
+        } catch (err: any) {
+          results.push({ session: s, success: false, error: err?.message || String(err) });
+        }
+      }
+      if (jsonMode) {
+        printJsonValue({ success: results.every((r) => r.success), data: { stopped: results } });
+      } else {
+        for (const r of results) {
+          if (r.success) {
+            console.log(`Stopped session '${r.session}'`);
+          } else {
+            console.error(`Failed to stop session '${r.session}': ${r.error}`);
+          }
+        }
+      }
+      return;
+    }
 
     await connection.ensureDaemon(session, opts, VERSION);
 
@@ -599,9 +785,11 @@ Fast browser automation CLI for AI agents (TypeScript port)
 USAGE:
   claw-browser <command> [args...]                # Use default session
   claw-browser <session> <command> [args...]      # Use named session
+  claw-browser --session <name> <command> [...]   # Use session via flag
   claw-browser start <session>                    # Start daemon session
   claw-browser stop <session>                     # Stop daemon session
   claw-browser connect <port|url> [session]       # Connect session to CDP
+  claw-browser session [list]                     # Show current or list active sessions
 
 COMMANDS:
   Navigation:
@@ -622,15 +810,20 @@ COMMANDS:
     eval, evaluate <script>      Evaluate JavaScript in current page
 
   Tabs:
-    tab [list]                   List tabs
+    tab                          List tabs (shows short id, tabId, and optional label)
     tab new [url]                Open a new tab (optionally navigate)
-    tab switch <index|tab-id>    Switch active tab
-    tab close [index|tab-id]     Close tab (default: active)
+    tab new --label docs [url]   Open a new tab with a label
+    tab <tN|label|tab-id>        Switch active tab
+    tab close [tN|label|tab-id]  Close tab (default: active)
+    window new                   Open a new window
 
   Session:
     start <session>              Start daemon session
     stop <session>               Stop daemon session
     connect <port|url> [session] Connect session to an existing Chrome CDP endpoint
+    session                      Show current session
+    session list                 List active sessions
+    profiles                     List local Chrome profiles
 
   Misc:
     help                         Show this help
@@ -643,6 +836,10 @@ EXAMPLES:
   claw-browser snapshot
   claw-browser eval "location.href"
   claw-browser tab list
+  claw-browser tab new --label docs https://agent-browser.dev
+  claw-browser tab t2
+  claw-browser tab close docs
+  claw-browser window new
   claw-browser --tab-id <tab-id> eval "document.title"
   claw-browser connect 9222
   claw-browser connect ws://127.0.0.1:9222/devtools/browser/abc123

@@ -41,8 +41,7 @@ export async function handleNavigate(cmd: any, state: DaemonState): Promise<any>
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const waitUntil = cmd.waitUntil || 'load';
-  const waitUntilValue = waitUntil === 'commit' ? 'commit' : 'load';
+  const waitUntilValue = cmd.waitUntil || 'load';
 
   // Origin-scoped header injection
   const sessionId = mgr.activeSessionId?.() || '';
@@ -118,6 +117,15 @@ export async function handleTitle(cmd: any, state: DaemonState): Promise<any> {
 
   const title = result?.targetInfo?.title || '';
   return { id, success: true, data: { title } };
+}
+
+export async function handleCdpUrl(cmd: any, state: DaemonState): Promise<any> {
+  const id = cmd.id || '';
+  const mgr = state.browser;
+  if (!mgr) {
+    return { id, success: false, error: 'Browser not launched' };
+  }
+  return { id, success: true, data: { cdpUrl: mgr.getCdpUrl() } };
 }
 
 export async function handleContent(cmd: any, state: DaemonState): Promise<any> {

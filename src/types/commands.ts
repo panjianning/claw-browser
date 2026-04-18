@@ -249,4 +249,7 @@ export interface Flags {
   headed?: boolean;
   cdp?: string;
   tabId?: string;
+  json?: boolean;
+  session?: string;
+  profile?: string;
 }

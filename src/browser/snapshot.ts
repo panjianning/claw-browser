@@ -22,19 +22,36 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
   const interactive = cmd.interactive === true;
 
   try {
+    state.refMap.clear();
     const tree = await takeSnapshot(
       mgr.client,
       sessionId,
+      state.iframeSessions,
       {
         compact,
         depth: maxDepth,
         selector,
         interactive,
-      },
-      state.refMap,
-      state.activeFrameId,
-      state.iframeSessions
+      }
     );
+
+    // Build command ref map (e.g. @e12) for follow-up actions.
+    const roleNameSeen = new Map<string, number>();
+    for (const [refId, ref] of Object.entries(tree.refs || {})) {
+      const role = typeof ref.role === 'string' ? ref.role : '';
+      const name = typeof ref.name === 'string' ? ref.name : '';
+      const key = `${role}\u0000${name}`;
+      const nth = roleNameSeen.get(key) || 0;
+      roleNameSeen.set(key, nth + 1);
+      const entry = {
+        role,
+        name,
+        nth,
+        frameId: state.activeFrameId || null,
+      };
+      state.refMap.set(refId, entry);
+      state.refMap.set(`@${refId}`, entry);
+    }
 
     const url = await mgr.getUrl().catch(() => '');
 
@@ -42,7 +59,8 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
       id,
       success: true,
       data: {
-        snapshot: tree,
+        snapshot: tree.tree,
+        refs: tree.refs,
         url,
       },
     };

@@ -50,6 +50,21 @@ export function parseCommand(args: string[], flags: Flags = {}): Command {
   return result;
 }
 
+function parseTabSelector(value: string): { index?: number; tabId?: string; shortId?: string; label?: string } {
+  const trimmed = value.trim();
+  if (/^\d+$/.test(trimmed)) {
+    const raw = parseInt(trimmed, 10);
+    return { index: Math.max(0, raw - 1) };
+  }
+  if (/^t[1-9]\d*$/i.test(trimmed)) {
+    return { shortId: trimmed.toLowerCase() };
+  }
+  if (/^[a-f0-9]{16,}$/i.test(trimmed)) {
+    return { tabId: trimmed };
+  }
+  return { label: trimmed };
+}
+
 function parseCommandInner(args: string[], flags: Flags): Command {
   if (args.length === 0) {
     throw new MissingArgumentsError('', '<command> [args...]');
@@ -146,6 +161,13 @@ function parseCommandInner(args: string[], flags: Flags): Command {
     case 'fill': {
       if (rest.length < 2) {
         throw new MissingArgumentsError('fill', 'fill <selector> <text>');
+      }
+      return { id, action: 'fill', selector: rest[0], value: rest.slice(1).join(' ') };
+    }
+
+    case 'setvalue': {
+      if (rest.length < 2) {
+        throw new MissingArgumentsError('setvalue', 'setvalue <selector> <value>');
       }
       return { id, action: 'fill', selector: rest[0], value: rest.slice(1).join(' ') };
     }
@@ -265,6 +287,38 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       }
     }
 
+    case 'mouse': {
+      const sub = rest[0];
+      if (!sub) {
+        throw new MissingArgumentsError('mouse', 'mouse <move|down|up|wheel> ...');
+      }
+      if (sub === 'move') {
+        if (rest.length < 3) {
+          throw new MissingArgumentsError('mouse move', 'mouse move <x> <y>');
+        }
+        return { id, action: 'mouse', event: 'move', x: Number(rest[1]), y: Number(rest[2]) };
+      }
+      if (sub === 'down') {
+        return { id, action: 'mouse', event: 'down', button: rest[1] || 'left' };
+      }
+      if (sub === 'up') {
+        return { id, action: 'mouse', event: 'up', button: rest[1] || 'left' };
+      }
+      if (sub === 'wheel') {
+        if (rest.length < 2) {
+          throw new MissingArgumentsError('mouse wheel', 'mouse wheel <dy> [dx]');
+        }
+        return {
+          id,
+          action: 'mouse',
+          event: 'wheel',
+          dy: Number(rest[1]),
+          dx: rest.length > 2 ? Number(rest[2]) : 0,
+        };
+      }
+      throw new UnknownSubcommandError(sub, ['move', 'down', 'up', 'wheel']);
+    }
+
     // === Scroll ===
     case 'scroll': {
       const result: Command = { id, action: 'scroll' };
@@ -311,6 +365,22 @@ function parseCommandInner(args: string[], flags: Flags): Command {
 
     // === Wait ===
     case 'wait': {
+      const textIdx = rest.findIndex((arg) => arg === '--text');
+      if (textIdx !== -1) {
+        if (textIdx + 1 >= rest.length) {
+          throw new MissingArgumentsError('wait --text', 'wait --text <text>');
+        }
+        return { id, action: 'wait', text: rest[textIdx + 1] };
+      }
+
+      const fnIdx = rest.findIndex((arg) => arg === '--fn');
+      if (fnIdx !== -1) {
+        if (fnIdx + 1 >= rest.length) {
+          throw new MissingArgumentsError('wait --fn', 'wait --fn <expression>');
+        }
+        return { id, action: 'waitforfunction', expression: rest[fnIdx + 1] };
+      }
+
       // Check for --url flag
       const urlIdx = rest.findIndex((arg) => arg === '--url' || arg === '-u');
       if (urlIdx !== -1) {
@@ -337,10 +407,15 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       const firstArg = rest[0];
       const timeout = parseInt(firstArg, 10);
 
+      const stateIdx = rest.findIndex((arg) => arg === '--state');
+      const selectorState = stateIdx !== -1 && stateIdx + 1 < rest.length ? rest[stateIdx + 1] : undefined;
+
       if (!isNaN(timeout)) {
         return { id, action: 'wait', timeout };
       } else {
-        return { id, action: 'waitforselector', selector: firstArg };
+        return selectorState
+          ? { id, action: 'wait', selector: firstArg, state: selectorState }
+          : { id, action: 'wait', selector: firstArg };
       }
     }
 
@@ -348,13 +423,27 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       if (rest.length === 0) {
         throw new MissingArgumentsError('waitforselector', 'waitforselector <selector>');
       }
-      return { id, action: 'waitforselector', selector: rest[0] };
+      return { id, action: 'wait', selector: rest[0] };
     }
 
     // === Snapshot & Screenshot ===
     case 'snapshot': {
       const markdown = rest.includes('--markdown') || rest.includes('-m');
-      return markdown ? { id, action: 'snapshot', markdown: true } : { id, action: 'snapshot' };
+      const interactive = rest.includes('--interactive') || rest.includes('-i');
+      const compact = rest.includes('--compact');
+      const maxDepthIdx = rest.findIndex((arg) => arg === '--max-depth');
+      const selectorIdx = rest.findIndex((arg) => arg === '--selector' || arg === '-s');
+      const cmd: Command = { id, action: 'snapshot' };
+      if (markdown) cmd.markdown = true;
+      if (interactive) cmd.interactive = true;
+      if (compact) cmd.compact = true;
+      if (maxDepthIdx !== -1 && maxDepthIdx + 1 < rest.length) {
+        cmd.maxDepth = parseInt(rest[maxDepthIdx + 1], 10);
+      }
+      if (selectorIdx !== -1 && selectorIdx + 1 < rest.length) {
+        cmd.selector = rest[selectorIdx + 1];
+      }
+      return cmd;
     }
 
     case 'screenshot': {
@@ -363,17 +452,54 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       if (rest.includes('--full-page') || rest.includes('-f')) {
         result.fullPage = true;
       }
+      if (rest.includes('--full')) {
+        result.fullPage = true;
+      }
 
       if (flags.cliAnnotate) {
         result.annotate = true;
       }
+      if (rest.includes('--annotate')) {
+        result.annotate = true;
+      }
 
-      const selector = rest.find((arg) => !arg.startsWith('-'));
+      const dirIdx = rest.findIndex((arg) => arg === '--screenshot-dir');
+      if (dirIdx !== -1 && dirIdx + 1 < rest.length) {
+        result.screenshotDir = rest[dirIdx + 1];
+      }
+      const formatIdx = rest.findIndex((arg) => arg === '--screenshot-format');
+      if (formatIdx !== -1 && formatIdx + 1 < rest.length) {
+        result.format = rest[formatIdx + 1];
+      }
+      const qualityIdx = rest.findIndex((arg) => arg === '--screenshot-quality');
+      if (qualityIdx !== -1 && qualityIdx + 1 < rest.length) {
+        result.quality = parseInt(rest[qualityIdx + 1], 10);
+      }
+
+      const selector = rest.find((arg, idx) => {
+        if (arg.startsWith('-')) return false;
+        const prev = idx > 0 ? rest[idx - 1] : '';
+        if (prev === '--screenshot-dir' || prev === '--screenshot-format' || prev === '--screenshot-quality') {
+          return false;
+        }
+        return true;
+      });
       if (selector) {
-        result.selector = selector;
+        if (selector.endsWith('.png') || selector.endsWith('.jpg') || selector.endsWith('.jpeg') || selector.endsWith('.webp')) {
+          result.path = selector;
+        } else {
+          result.selector = selector;
+        }
       }
 
       return result;
+    }
+
+    case 'pdf': {
+      if (rest.length === 0) {
+        throw new MissingArgumentsError('pdf', 'pdf <path>');
+      }
+      return { id, action: 'pdf', path: rest[0] };
     }
 
     // === Cookies ===
@@ -381,14 +507,14 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       const sub = rest[0];
 
       if (sub === 'get' || !sub) {
-        return { id, action: 'getCookies' };
+        return { id, action: 'cookies_get' };
       } else if (sub === 'set') {
         if (rest.length < 3) {
           throw new MissingArgumentsError('cookies set', 'cookies set <name> <value>');
         }
-        return { id, action: 'setCookie', name: rest[1], value: rest[2] };
+        return { id, action: 'cookies_set', name: rest[1], value: rest[2] };
       } else if (sub === 'clear') {
-        return { id, action: 'clearCookies' };
+        return { id, action: 'cookies_clear' };
       } else {
         throw new UnknownSubcommandError(sub, ['get', 'set', 'clear']);
       }
@@ -399,31 +525,51 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       const sub = rest[0];
 
       if (!sub) {
-        throw new MissingArgumentsError('storage', 'storage <get|set|clear> [args...]');
+        throw new MissingArgumentsError('storage', 'storage <local|session> [key|set|clear] ...');
       }
 
-      if (sub === 'get') {
-        if (rest.length < 2) {
-          throw new MissingArgumentsError('storage get', 'storage get <local|session> [key]');
+      if (sub === 'get' || sub === 'set' || sub === 'clear') {
+        if (sub === 'get') {
+          if (rest.length < 2) {
+            throw new MissingArgumentsError('storage get', 'storage get <local|session> [key]');
+          }
+          const type = rest[1] === 'local' ? 'local' : 'session';
+          const key = rest[2];
+          return key ? { id, action: 'storage_get', type, key } : { id, action: 'storage_get', type };
+        } else if (sub === 'set') {
+          if (rest.length < 4) {
+            throw new MissingArgumentsError('storage set', 'storage set <local|session> <key> <value>');
+          }
+          const type = rest[1] === 'local' ? 'local' : 'session';
+          return { id, action: 'storage_set', type, key: rest[2], value: rest.slice(3).join(' ') };
+        } else {
+          if (rest.length < 2) {
+            throw new MissingArgumentsError('storage clear', 'storage clear <local|session>');
+          }
+          const type = rest[1] === 'local' ? 'local' : 'session';
+          return { id, action: 'storage_clear', type };
         }
-        const type = rest[1] === 'local' ? 'localStorage' : 'sessionStorage';
-        const key = rest[2];
-        return key ? { id, action: 'getStorage', type, key } : { id, action: 'getStorage', type };
-      } else if (sub === 'set') {
-        if (rest.length < 4) {
-          throw new MissingArgumentsError('storage set', 'storage set <local|session> <key> <value>');
-        }
-        const type = rest[1] === 'local' ? 'localStorage' : 'sessionStorage';
-        return { id, action: 'setStorage', type, key: rest[2], value: rest[3] };
-      } else if (sub === 'clear') {
-        if (rest.length < 2) {
-          throw new MissingArgumentsError('storage clear', 'storage clear <local|session>');
-        }
-        const type = rest[1] === 'local' ? 'localStorage' : 'sessionStorage';
-        return { id, action: 'clearStorage', type };
-      } else {
-        throw new UnknownSubcommandError(sub, ['get', 'set', 'clear']);
       }
+
+      if (sub === 'local' || sub === 'session') {
+        const type = sub;
+        const next = rest[1];
+        if (!next) {
+          return { id, action: 'storage_get', type };
+        }
+        if (next === 'set') {
+          if (rest.length < 4) {
+            throw new MissingArgumentsError(`storage ${type} set`, `storage ${type} set <key> <value>`);
+          }
+          return { id, action: 'storage_set', type, key: rest[2], value: rest.slice(3).join(' ') };
+        }
+        if (next === 'clear') {
+          return { id, action: 'storage_clear', type };
+        }
+        return { id, action: 'storage_get', type, key: next };
+      }
+
+      throw new UnknownSubcommandError(sub, ['local', 'session', 'get', 'set', 'clear']);
     }
 
     // === Network ===
@@ -434,17 +580,90 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       return { id, action: 'route', pattern: rest[0] };
     }
 
-    // === State ===
-    case 'save': {
-      return rest.length > 0
-        ? { id, action: 'saveState', path: rest[0] }
-        : { id, action: 'saveState' };
+    case 'network': {
+      const sub = rest[0];
+      if (!sub) {
+        throw new MissingArgumentsError('network', 'network <route|unroute|requests|request|har> ...');
+      }
+      if (sub === 'route') {
+        if (rest.length < 2) {
+          throw new MissingArgumentsError('network route', 'network route <url> [--abort|--body <json>]');
+        }
+        const cmd: Command = { id, action: 'route', pattern: rest[1] };
+        const abort = rest.includes('--abort');
+        if (abort) {
+          cmd.abort = true;
+        }
+        const bodyIdx = rest.findIndex((arg) => arg === '--body');
+        if (bodyIdx !== -1 && bodyIdx + 1 < rest.length) {
+          cmd.body = rest[bodyIdx + 1];
+        }
+        return cmd;
+      }
+      if (sub === 'unroute') {
+        return rest[1] ? { id, action: 'unroute', pattern: rest[1] } : { id, action: 'unroute' };
+      }
+      if (sub === 'requests') {
+        const cmd: Command = { id, action: 'network_requests' };
+        const filterIdx = rest.findIndex((arg) => arg === '--filter');
+        if (filterIdx !== -1 && filterIdx + 1 < rest.length) cmd.filter = rest[filterIdx + 1];
+        const typeIdx = rest.findIndex((arg) => arg === '--type');
+        if (typeIdx !== -1 && typeIdx + 1 < rest.length) cmd.resourceType = rest[typeIdx + 1];
+        const methodIdx = rest.findIndex((arg) => arg === '--method');
+        if (methodIdx !== -1 && methodIdx + 1 < rest.length) cmd.method = rest[methodIdx + 1];
+        const statusIdx = rest.findIndex((arg) => arg === '--status');
+        if (statusIdx !== -1 && statusIdx + 1 < rest.length) cmd.status = rest[statusIdx + 1];
+        return cmd;
+      }
+      if (sub === 'request') {
+        if (rest.length < 2) {
+          throw new MissingArgumentsError('network request', 'network request <requestId>');
+        }
+        return { id, action: 'network_request', requestId: rest[1] };
+      }
+      if (sub === 'har') {
+        if (rest[1] === 'start') return { id, action: 'har_start' };
+        if (rest[1] === 'stop') return rest[2] ? { id, action: 'har_stop', path: rest[2] } : { id, action: 'har_stop' };
+      }
+      throw new UnknownSubcommandError(sub, ['route', 'unroute', 'requests', 'request', 'har']);
     }
 
-    case 'load': {
-      return rest.length > 0
-        ? { id, action: 'loadState', path: rest[0] }
-        : { id, action: 'loadState' };
+    // === State ===
+    case 'state': {
+      const sub = rest[0];
+      if (!sub) {
+        throw new MissingArgumentsError('state', 'state <save|load|list|show|rename|clear|clean> ...');
+      }
+      if (sub === 'save') {
+        return rest[1] ? { id, action: 'state_save', path: rest[1] } : { id, action: 'state_save' };
+      }
+      if (sub === 'load') {
+        if (!rest[1]) {
+          throw new MissingArgumentsError('state load', 'state load <path>');
+        }
+        return { id, action: 'state_load', path: rest[1] };
+      }
+      if (sub === 'list') return { id, action: 'state_list' };
+      if (sub === 'show') {
+        if (!rest[1]) throw new MissingArgumentsError('state show', 'state show <file>');
+        return { id, action: 'state_show', file: rest[1] };
+      }
+      if (sub === 'rename') {
+        if (rest.length < 3) throw new MissingArgumentsError('state rename', 'state rename <old> <new>');
+        return { id, action: 'state_rename', old: rest[1], new: rest[2] };
+      }
+      if (sub === 'clear') {
+        if (rest.includes('--all')) return { id, action: 'state_clear', all: true };
+        return rest[1] ? { id, action: 'state_clear', name: rest[1] } : { id, action: 'state_clear' };
+      }
+      if (sub === 'clean') {
+        const idx = rest.findIndex((arg) => arg === '--older-than');
+        if (idx === -1 || idx + 1 >= rest.length) {
+          throw new MissingArgumentsError('state clean', 'state clean --older-than <days>');
+        }
+        return { id, action: 'state_clean', olderThanDays: parseInt(rest[idx + 1], 10) };
+      }
+      throw new UnknownSubcommandError(sub, ['save', 'load', 'list', 'show', 'rename', 'clear', 'clean']);
     }
 
     // === JavaScript evaluation ===
@@ -453,8 +672,111 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       if (rest.length === 0) {
         throw new MissingArgumentsError(cmd, `${cmd} <script>`);
       }
-      return { id, action: 'evaluate', script: rest.join(' ') };
+      const stdin = rest.includes('--stdin');
+      const bIdx = rest.findIndex((arg) => arg === '-b');
+      if (stdin) {
+        return { id, action: 'evaluate', stdin: true };
+      }
+      if (bIdx !== -1 && bIdx + 1 < rest.length) {
+        return { id, action: 'evaluate', scriptBase64: rest[bIdx + 1], base64: true };
+      }
+      return { id, action: 'evaluate', script: rest.filter((arg) => arg !== '--stdin').join(' ') };
     }
+
+    case 'get': {
+      const sub = rest[0];
+      if (!sub) {
+        throw new MissingArgumentsError('get', 'get <text|html|value|attr|title|url|cdp-url|count|box|styles> ...');
+      }
+      if (sub === 'text') {
+        if (!rest[1]) throw new MissingArgumentsError('get text', 'get text <selector>');
+        return { id, action: 'gettext', selector: rest[1] };
+      }
+      if (sub === 'html') {
+        if (!rest[1]) throw new MissingArgumentsError('get html', 'get html <selector>');
+        return { id, action: 'innerhtml', selector: rest[1] };
+      }
+      if (sub === 'value') {
+        if (!rest[1]) throw new MissingArgumentsError('get value', 'get value <selector>');
+        return { id, action: 'inputvalue', selector: rest[1] };
+      }
+      if (sub === 'attr') {
+        if (rest.length < 3) throw new MissingArgumentsError('get attr', 'get attr <selector> <attr>');
+        return { id, action: 'getattribute', selector: rest[1], attribute: rest[2] };
+      }
+      if (sub === 'title') return { id, action: 'title' };
+      if (sub === 'url') return { id, action: 'url' };
+      if (sub === 'cdp-url') return { id, action: 'cdp_url' };
+      if (sub === 'count') {
+        if (!rest[1]) throw new MissingArgumentsError('get count', 'get count <selector>');
+        return { id, action: 'count', selector: rest[1] };
+      }
+      if (sub === 'box') {
+        if (!rest[1]) throw new MissingArgumentsError('get box', 'get box <selector>');
+        return { id, action: 'boundingbox', selector: rest[1] };
+      }
+      if (sub === 'styles') {
+        if (!rest[1]) throw new MissingArgumentsError('get styles', 'get styles <selector>');
+        return { id, action: 'styles', selector: rest[1] };
+      }
+      throw new UnknownSubcommandError(sub, ['text', 'html', 'value', 'attr', 'title', 'url', 'cdp-url', 'count', 'box', 'styles']);
+    }
+
+    case 'is': {
+      const sub = rest[0];
+      if (!sub || !rest[1]) {
+        throw new MissingArgumentsError('is', 'is <visible|enabled|checked> <selector>');
+      }
+      if (sub === 'visible') return { id, action: 'isvisible', selector: rest[1] };
+      if (sub === 'enabled') return { id, action: 'isenabled', selector: rest[1] };
+      if (sub === 'checked') return { id, action: 'ischecked', selector: rest[1] };
+      throw new UnknownSubcommandError(sub, ['visible', 'enabled', 'checked']);
+    }
+
+    case 'set': {
+      const sub = rest[0];
+      if (!sub) {
+        throw new MissingArgumentsError('set', 'set <viewport|offline|headers|media|credentials> ...');
+      }
+      if (sub === 'viewport') {
+        if (rest.length < 3) throw new MissingArgumentsError('set viewport', 'set viewport <width> <height> [scale]');
+        const cmd: Command = { id, action: 'viewport', width: parseInt(rest[1], 10), height: parseInt(rest[2], 10) };
+        if (rest[3]) cmd.deviceScaleFactor = parseFloat(rest[3]);
+        return cmd;
+      }
+      if (sub === 'offline') {
+        const mode = rest[1] || 'on';
+        return { id, action: 'offline', offline: mode !== 'off' };
+      }
+      if (sub === 'headers') {
+        if (!rest[1]) throw new MissingArgumentsError('set headers', 'set headers <json>');
+        return { id, action: 'headers', headers: rest.slice(1).join(' ') };
+      }
+      if (sub === 'media') {
+        return { id, action: 'set_media', colorScheme: rest[1] || 'light' };
+      }
+      if (sub === 'credentials') {
+        if (rest.length < 3) throw new MissingArgumentsError('set credentials', 'set credentials <username> <password>');
+        return { id, action: 'credentials_set', username: rest[1], password: rest[2] };
+      }
+      if (sub === 'device') {
+        if (!rest[1]) throw new MissingArgumentsError('set device', 'set device <name>');
+        return { id, action: 'device', name: rest.slice(1).join(' ') };
+      }
+      if (sub === 'geo') {
+        if (rest.length < 3) throw new MissingArgumentsError('set geo', 'set geo <lat> <lng>');
+        return { id, action: 'geolocation', latitude: parseFloat(rest[1]), longitude: parseFloat(rest[2]) };
+      }
+      throw new UnknownSubcommandError(sub, ['viewport', 'offline', 'headers', 'media', 'credentials', 'device', 'geo']);
+    }
+
+    case 'close':
+    case 'quit':
+    case 'exit':
+      if (rest.includes('--all')) {
+        return { id, action: 'close_all' };
+      }
+      return { id, action: 'close' };
 
     // === Tabs ===
     case 'tab':
@@ -464,36 +786,133 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       if (!sub || sub === 'list') {
         return { id, action: 'tab_list' };
       } else if (sub === 'new') {
-        const url = rest[1];
-        return url ? { id, action: 'tab_new', url } : { id, action: 'tab_new' };
+        let label: string | undefined;
+        let url: string | undefined;
+
+        for (let i = 1; i < rest.length; i++) {
+          const arg = rest[i];
+          if (arg === '--label') {
+            const next = rest[i + 1];
+            if (!next) {
+              throw new MissingArgumentsError('tab new --label', 'tab new --label <name> [url]');
+            }
+            label = next;
+            i++;
+            continue;
+          }
+          if (!url) {
+            url = arg;
+          }
+        }
+
+        const cmd: Command = { id, action: 'tab_new' };
+        if (label) {
+          cmd.label = label;
+        }
+        if (url) {
+          cmd.url = url;
+        }
+        return cmd;
       } else if (sub === 'close') {
         const target = rest[1];
         if (!target) {
           return { id, action: 'tab_close' };
         }
-        if (/^\d+$/.test(target)) {
-          const index = parseInt(target, 10);
-          return { id, action: 'tab_close', index };
-        }
-        return { id, action: 'tab_close', tabId: target };
+        return { id, action: 'tab_close', ...parseTabSelector(target) };
       } else if (sub === 'switch') {
         if (rest.length < 2) {
-          throw new MissingArgumentsError('tab switch', 'tab switch <index|tab-id>');
+          throw new MissingArgumentsError('tab switch', 'tab switch <tN|label|tab-id>');
         }
         const target = rest[1];
-        if (/^\d+$/.test(target)) {
-          const index = parseInt(target, 10);
-          return { id, action: 'tab_switch', index };
-        }
-        return { id, action: 'tab_switch', tabId: target };
+        return { id, action: 'tab_switch', ...parseTabSelector(target) };
       } else {
-        if (/^\d+$/.test(sub)) {
-          const numeric = parseInt(sub, 10);
-          return { id, action: 'tab_switch', index: numeric };
+        if (sub === '--help' || sub === '-h') {
+          throw new MissingArgumentsError('tab', 'tab [list|new|close|switch|<tN|label|tab-id>]');
         }
-        throw new UnknownSubcommandError(sub, ['list', 'new', 'close', 'switch', '<index>']);
+        return { id, action: 'tab_switch', ...parseTabSelector(sub) };
       }
     }
+
+    case 'window': {
+      const sub = rest[0];
+      if (sub !== 'new') {
+        throw new UnknownSubcommandError(sub || '', ['new']);
+      }
+      const cmd: Command = { id, action: 'window_new' };
+      let i = 1;
+      while (i < rest.length) {
+        const arg = rest[i];
+        if (arg === '--label') {
+          const next = rest[i + 1];
+          if (!next) {
+            throw new MissingArgumentsError('window new --label', 'window new --label <name> [url]');
+          }
+          cmd.label = next;
+          i += 2;
+          continue;
+        }
+        if (!cmd.url && !arg.startsWith('-')) {
+          cmd.url = arg;
+        }
+        i++;
+      }
+      return cmd;
+    }
+
+    case 'frame': {
+      if (!rest[0]) {
+        throw new MissingArgumentsError('frame', 'frame <selector|main>');
+      }
+      if (rest[0] === 'main') {
+        return { id, action: 'mainframe' };
+      }
+      return { id, action: 'frame', selector: rest[0] };
+    }
+
+    case 'dialog': {
+      const sub = rest[0];
+      if (!sub) {
+        throw new MissingArgumentsError('dialog', 'dialog <accept|dismiss|status> [text]');
+      }
+      if (sub === 'accept') return { id, action: 'dialog', op: 'accept', text: rest.slice(1).join(' ') || undefined };
+      if (sub === 'dismiss') return { id, action: 'dialog', op: 'dismiss' };
+      if (sub === 'status') return { id, action: 'dialog', op: 'status' };
+      throw new UnknownSubcommandError(sub, ['accept', 'dismiss', 'status']);
+    }
+
+    case 'find': {
+      if (rest.length < 3) {
+        throw new MissingArgumentsError('find', 'find <kind> <query> <action> [value]');
+      }
+      return {
+        id,
+        action: 'find',
+        kind: rest[0],
+        query: rest[1],
+        findAction: rest[2],
+        value: rest.length > 3 ? rest.slice(3).join(' ') : undefined,
+      };
+    }
+
+    case 'stream': {
+      const sub = rest[0];
+      if (!sub) throw new MissingArgumentsError('stream', 'stream <enable|disable|status> ...');
+      if (sub === 'enable') {
+        const portIdx = rest.findIndex((arg) => arg === '--port');
+        const port = portIdx !== -1 && portIdx + 1 < rest.length ? parseInt(rest[portIdx + 1], 10) : undefined;
+        return { id, action: 'stream_enable', port };
+      }
+      if (sub === 'disable') return { id, action: 'stream_disable' };
+      if (sub === 'status') return { id, action: 'stream_status' };
+      throw new UnknownSubcommandError(sub, ['enable', 'disable', 'status']);
+    }
+
+    case 'install':
+      return { id, action: 'install' };
+    case 'upgrade':
+      return { id, action: 'upgrade' };
+    case 'chat':
+      return { id, action: 'chat', prompt: rest.join(' ') || undefined };
 
     // === Unknown ===
     default:

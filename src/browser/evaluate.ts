@@ -5,7 +5,19 @@ import type { DaemonState } from './state.js';
  */
 export async function handleEvaluate(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
-  const script = cmd.script;
+  let script = cmd.script;
+
+  if (cmd.base64 === true && typeof cmd.scriptBase64 === 'string') {
+    try {
+      script = Buffer.from(cmd.scriptBase64, 'base64').toString('utf-8');
+    } catch {
+      return { id, success: false, error: 'Invalid base64 script payload' };
+    }
+  }
+
+  if (cmd.stdin === true) {
+    script = await readStdin();
+  }
 
   if (!script || typeof script !== 'string') {
     return { id, success: false, error: "Missing 'script' parameter" };
@@ -18,4 +30,18 @@ export async function handleEvaluate(cmd: any, state: DaemonState): Promise<any>
 
   const result = await mgr.evaluate(script);
   return { id, success: true, data: { result } };
+}
+
+async function readStdin(): Promise<string> {
+  if (process.stdin.isTTY) {
+    return '';
+  }
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    process.stdin.on('data', (chunk) => {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk)));
+    });
+    process.stdin.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
+    process.stdin.on('error', reject);
+  });
 }

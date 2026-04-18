@@ -133,6 +133,7 @@ export class BrowserManager {
   private wsUrl: string;
   private pages: PageInfo[] = [];
   private activePageIndex = 0;
+  private tabLabels = new Map<string, string>();
   private defaultTimeoutMs = 25000;
   public downloadPath?: string;
   public ignoreHttpsErrors = false;
@@ -287,6 +288,8 @@ export class BrowserManager {
       const sessionId = this.pages[0].sessionId;
       await this.enableDomains(sessionId);
     }
+
+    this.pruneTabLabels();
   }
 
   private async enableDomains(sessionId: string): Promise<void> {
@@ -638,12 +641,16 @@ export class BrowserManager {
     return this.pages.length;
   }
 
-  public tabList(): Array<{ id: string; title: string; url: string; active: boolean }> {
+  public tabList(): Array<{ id: string; tabId: string; title: string; url: string; active: boolean; index: number; shortId: string; label?: string }> {
     return this.pages.map((p, index) => ({
       id: p.targetId,
+      tabId: p.targetId,
       title: p.title,
       url: p.url,
       active: index === this.activePageIndex,
+      index,
+      shortId: this.shortTabId(index),
+      label: this.tabLabels.get(p.targetId),
     }));
   }
 
@@ -664,6 +671,22 @@ export class BrowserManager {
       throw new Error(`Tab not found: ${tabId}`);
     }
     this.activePageIndex = index;
+  }
+
+  public setActivePageByShortId(shortId: string): void {
+    const parsed = this.parseShortId(shortId);
+    if (parsed === null) {
+      throw new Error(`Invalid tab reference: ${shortId}`);
+    }
+    this.setActivePage(parsed);
+  }
+
+  public setActivePageByLabel(label: string): void {
+    const targetId = this.findTargetIdByLabel(label);
+    if (!targetId) {
+      throw new Error(`Tab label not found: ${label}`);
+    }
+    this.setActivePageByTargetId(targetId);
   }
 
   public async createNewPage(): Promise<PageInfo> {
@@ -690,6 +713,31 @@ export class BrowserManager {
     return newPage;
   }
 
+  public async createNewWindow(): Promise<PageInfo> {
+    const createResult = (await this.client.sendCommand('Target.createTarget', {
+      url: 'about:blank',
+      newWindow: true,
+    })) as CreateTargetResult;
+
+    const attachResult = (await this.client.sendCommand('Target.attachToTarget', {
+      targetId: createResult.targetId,
+      flatten: true,
+    })) as AttachToTargetResult;
+
+    const newPage: PageInfo = {
+      targetId: createResult.targetId,
+      sessionId: attachResult.sessionId,
+      url: 'about:blank',
+      title: '',
+      targetType: 'page',
+    };
+
+    this.pages.push(newPage);
+    this.activePageIndex = this.pages.length - 1;
+    await this.enableDomains(attachResult.sessionId);
+    return newPage;
+  }
+
   public async closePage(targetId: string): Promise<void> {
     const index = this.pages.findIndex((p) => p.targetId === targetId);
     if (index === -1) {
@@ -698,6 +746,7 @@ export class BrowserManager {
 
     await this.client.sendCommand('Target.closeTarget', { targetId });
     this.pages.splice(index, 1);
+    this.tabLabels.delete(targetId);
 
     // Adjust active page index if needed
     if (this.activePageIndex >= this.pages.length && this.pages.length > 0) {
@@ -734,11 +783,123 @@ export class BrowserManager {
       return;
     }
     this.pages.splice(index, 1);
+    this.tabLabels.delete(targetId);
     if (this.activePageIndex >= this.pages.length && this.pages.length > 0) {
       this.activePageIndex = this.pages.length - 1;
     }
     if (this.pages.length === 0) {
       this.activePageIndex = 0;
+    }
+  }
+
+  public shortTabId(index: number): string {
+    return `t${index + 1}`;
+  }
+
+  public parseShortId(value: string): number | null {
+    const m = /^t([1-9]\d*)$/i.exec(value.trim());
+    if (!m) {
+      return null;
+    }
+    const idx = parseInt(m[1], 10) - 1;
+    if (Number.isNaN(idx) || idx < 0 || idx >= this.pages.length) {
+      return null;
+    }
+    return idx;
+  }
+
+  public setTabLabel(targetId: string, label: string | null): void {
+    if (!this.pages.some((p) => p.targetId === targetId)) {
+      throw new Error(`Tab not found: ${targetId}`);
+    }
+    if (!label || label.trim().length === 0) {
+      this.tabLabels.delete(targetId);
+      return;
+    }
+
+    const normalized = label.trim();
+    const conflict = this.findTargetIdByLabel(normalized);
+    if (conflict && conflict !== targetId) {
+      throw new Error(`Tab label already exists: ${normalized}`);
+    }
+    this.tabLabels.set(targetId, normalized);
+  }
+
+  public findTargetIdByLabel(label: string): string | null {
+    const normalized = label.trim().toLowerCase();
+    if (normalized.length === 0) {
+      return null;
+    }
+    for (const [targetId, existing] of this.tabLabels.entries()) {
+      if (existing.toLowerCase() === normalized) {
+        return targetId;
+      }
+    }
+    return null;
+  }
+
+  public async syncTrackedTabs(): Promise<void> {
+    const activeTargetId = this.getActivePage()?.targetId ?? null;
+    const result = (await this.client.sendCommand('Target.getTargets', {})) as GetTargetsResult;
+    const pageTargets = result.targetInfos.filter(shouldTrackTarget);
+    const nextPages: PageInfo[] = [];
+
+    for (const target of pageTargets) {
+      const existing = this.pages.find((p) => p.targetId === target.targetId);
+      if (existing) {
+        existing.url = target.url;
+        existing.title = target.title;
+        existing.targetType = target.type;
+        nextPages.push(existing);
+        continue;
+      }
+
+      const attachResult = (await this.client.sendCommand('Target.attachToTarget', {
+        targetId: target.targetId,
+        flatten: true,
+      })) as AttachToTargetResult;
+
+      const page: PageInfo = {
+        targetId: target.targetId,
+        sessionId: attachResult.sessionId,
+        url: target.url,
+        title: target.title,
+        targetType: target.type,
+      };
+      nextPages.push(page);
+      await this.enableDomains(attachResult.sessionId);
+    }
+
+    this.pages = nextPages;
+    this.pruneTabLabels();
+
+    if (this.pages.length === 0) {
+      this.activePageIndex = 0;
+      await this.ensurePage();
+      return;
+    }
+
+    if (activeTargetId) {
+      const nextIdx = this.pages.findIndex((p) => p.targetId === activeTargetId);
+      if (nextIdx >= 0) {
+        this.activePageIndex = nextIdx;
+        return;
+      }
+    }
+    if (this.activePageIndex >= this.pages.length) {
+      this.activePageIndex = this.pages.length - 1;
+    }
+  }
+
+  private pruneTabLabels(): void {
+    if (this.tabLabels.size === 0) {
+      return;
+    }
+    const validTargets = new Set(this.pages.map((p) => p.targetId));
+    for (const targetId of this.tabLabels.keys()) {
+      if (!validTargets.has(targetId)) {
+        this.tabLabels.delete(targetId);
+      }
     }
   }
 }

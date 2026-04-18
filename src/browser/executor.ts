@@ -193,6 +193,8 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
   const persistence = await import('./persistence.js');
   const tabs = await import('./tabs.js');
   const evaluate = await import('./evaluate.js');
+  const queries = await import('./queries.js');
+  const sessionData = await import('./session-data.js');
 
   switch (action) {
     // Browser lifecycle
@@ -207,7 +209,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'url':
       return navigation.handleUrl(cmd, state);
     case 'cdp_url':
-      return errorResponse(id, 'cdp_url handler not yet implemented');
+      return navigation.handleCdpUrl(cmd, state);
     case 'title':
       return navigation.handleTitle(cmd, state);
     case 'content':
@@ -243,41 +245,41 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'scroll':
       return interactions.handleScroll(cmd, state);
     case 'select':
-      return errorResponse(id, 'select handler not yet implemented');
+      return interactions.handleSelect(cmd, state);
     case 'check':
-      return errorResponse(id, 'check handler not yet implemented');
+      return interactions.handleCheck(cmd, state);
     case 'uncheck':
-      return errorResponse(id, 'uncheck handler not yet implemented');
+      return interactions.handleUncheck(cmd, state);
     case 'focus':
-      return errorResponse(id, 'focus handler not yet implemented');
+      return interactions.handleFocus(cmd, state);
     case 'clear':
       return errorResponse(id, 'clear handler not yet implemented');
     case 'tap':
       return errorResponse(id, 'tap handler not yet implemented');
     case 'drag':
-      return errorResponse(id, 'drag handler not yet implemented');
+      return interactions.handleDrag(cmd, state);
 
     // Element queries
     case 'gettext':
-      return errorResponse(id, 'gettext handler not yet implemented');
+      return queries.handleGettext(cmd, state);
     case 'getattribute':
-      return errorResponse(id, 'getattribute handler not yet implemented');
+      return queries.handleGetattribute(cmd, state);
     case 'isvisible':
-      return errorResponse(id, 'isvisible handler not yet implemented');
+      return queries.handleIsvisible(cmd, state);
     case 'isenabled':
-      return errorResponse(id, 'isenabled handler not yet implemented');
+      return queries.handleIsenabled(cmd, state);
     case 'ischecked':
-      return errorResponse(id, 'ischecked handler not yet implemented');
+      return queries.handleIschecked(cmd, state);
     case 'innertext':
-      return errorResponse(id, 'innertext handler not yet implemented');
+      return queries.handleInnertext(cmd, state);
     case 'innerhtml':
-      return errorResponse(id, 'innerhtml handler not yet implemented');
+      return queries.handleInnerhtml(cmd, state);
     case 'inputvalue':
-      return errorResponse(id, 'inputvalue handler not yet implemented');
+      return queries.handleInputvalue(cmd, state);
     case 'boundingbox':
-      return errorResponse(id, 'boundingbox handler not yet implemented');
+      return queries.handleBoundingbox(cmd, state);
     case 'count':
-      return errorResponse(id, 'count handler not yet implemented');
+      return queries.handleCount(cmd, state);
 
     // Locators
     case 'getbyrole':
@@ -323,9 +325,13 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Mouse and keyboard
     case 'mouse':
-      return errorResponse(id, 'mouse handler not yet implemented');
+      return interactions.handleMouse(cmd, state);
     case 'keyboard':
-      return errorResponse(id, 'keyboard handler not yet implemented');
+      return interactions.handleKeyboard(cmd, state);
+    case 'keydown':
+      return interactions.handleKeydown(cmd, state);
+    case 'keyup':
+      return interactions.handleKeyup(cmd, state);
     case 'wheel':
       return errorResponse(id, 'wheel handler not yet implemented');
 
@@ -342,6 +348,8 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'tab_close':
     case 'closeTab':
       return tabs.handleTabClose(cmd, state);
+    case 'window_new':
+      return tabs.handleWindowNew(cmd, state);
 
     // Frames
     case 'frame':
@@ -351,25 +359,25 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Cookies and storage
     case 'cookies_get':
-      return errorResponse(id, 'cookies_get handler not yet implemented');
+      return sessionData.handleCookiesGet(cmd, state);
     case 'cookies_set':
-      return errorResponse(id, 'cookies_set handler not yet implemented');
+      return sessionData.handleCookiesSet(cmd, state);
     case 'cookies_clear':
-      return errorResponse(id, 'cookies_clear handler not yet implemented');
+      return sessionData.handleCookiesClear(cmd, state);
     case 'storage_get':
-      return errorResponse(id, 'storage_get handler not yet implemented');
+      return sessionData.handleStorageGet(cmd, state);
     case 'storage_set':
-      return errorResponse(id, 'storage_set handler not yet implemented');
+      return sessionData.handleStorageSet(cmd, state);
     case 'storage_clear':
-      return errorResponse(id, 'storage_clear handler not yet implemented');
+      return sessionData.handleStorageClear(cmd, state);
 
     // Network
     case 'setcontent':
       return errorResponse(id, 'setcontent handler not yet implemented');
     case 'headers':
-      return errorResponse(id, 'headers handler not yet implemented');
+      return sessionData.handleSetHeaders(cmd, state);
     case 'offline':
-      return errorResponse(id, 'offline handler not yet implemented');
+      return sessionData.handleSetOffline(cmd, state);
 
     // Console and errors
     case 'console':
@@ -394,6 +402,10 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
       return errorResponse(id, 'route handler not yet implemented');
     case 'unroute':
       return errorResponse(id, 'unroute handler not yet implemented');
+    case 'network_requests':
+      return errorResponse(id, 'network requests listing is not yet implemented');
+    case 'network_request':
+      return errorResponse(id, 'network request detail is not yet implemented');
 
     // Download management
     case 'download':
@@ -401,7 +413,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Media and viewport
     case 'viewport':
-      return errorResponse(id, 'viewport handler not yet implemented');
+      return sessionData.handleSetViewport(cmd, state);
     case 'useragent':
     case 'user_agent':
       return errorResponse(id, 'useragent handler not yet implemented');
@@ -538,7 +550,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'selectall':
       return errorResponse(id, 'selectall handler not yet implemented');
     case 'scrollintoview':
-      return errorResponse(id, 'scrollintoview handler not yet implemented');
+      return interactions.handleScrollIntoView(cmd, state);
     case 'dispatch':
       return errorResponse(id, 'dispatch handler not yet implemented');
     case 'highlight':
@@ -546,11 +558,11 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'setvalue':
       return errorResponse(id, 'setvalue handler not yet implemented');
     case 'styles':
-      return errorResponse(id, 'styles handler not yet implemented');
+      return queries.handleStyles(cmd, state);
     case 'bringtofront':
       return errorResponse(id, 'bringtofront handler not yet implemented');
     case 'upload':
-      return errorResponse(id, 'upload handler not yet implemented');
+      return interactions.handleUpload(cmd, state);
     case 'addscript':
       return errorResponse(id, 'addscript handler not yet implemented');
     case 'addinitscript':
@@ -569,9 +581,12 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
       return errorResponse(id, 'multiselect handler not yet implemented');
     case 'responsebody':
       return errorResponse(id, 'responsebody handler not yet implemented');
-    case 'window_new':
-      return errorResponse(id, 'window_new handler not yet implemented');
-
+    case 'install':
+      return errorResponse(id, 'install command is managed by the Rust agent-browser binary and is not implemented in claw-browser yet');
+    case 'upgrade':
+      return errorResponse(id, 'upgrade command is managed by the Rust agent-browser binary and is not implemented in claw-browser yet');
+    case 'chat':
+      return errorResponse(id, 'chat command is not implemented in claw-browser yet');
     // Confirmation
     case 'confirm':
       return errorResponse(id, 'confirm handler not yet implemented');

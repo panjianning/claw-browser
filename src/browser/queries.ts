@@ -177,6 +177,166 @@ export async function handleCount(cmd: any, state: DaemonState): Promise<any> {
   }
 }
 
+export async function handleInnertext(cmd: any, state: DaemonState): Promise<any> {
+  return handleGettext(cmd, state);
+}
+
+export async function handleInnerhtml(cmd: any, state: DaemonState): Promise<any> {
+  const id = cmd.id || '';
+  const selector = cmd.selector;
+  if (!selector || typeof selector !== 'string') {
+    return { id, success: false, error: "Missing 'selector' parameter" };
+  }
+  const mgr = state.browser;
+  if (!mgr) {
+    return { id, success: false, error: 'Browser not launched' };
+  }
+  const sessionId = mgr.activeSessionId?.() || '';
+  try {
+    const { objectId, effectiveSessionId } = await resolveElementObjectId(
+      mgr.client,
+      sessionId,
+      state.refMap,
+      selector,
+      state.iframeSessions
+    );
+    const result = await mgr.client.sendCommand(
+      'Runtime.callFunctionOn',
+      {
+        functionDeclaration: 'function() { return this.innerHTML || ""; }',
+        objectId,
+        returnByValue: true,
+        awaitPromise: false,
+      },
+      effectiveSessionId
+    );
+    return { id, success: true, data: { html: result?.result?.value || '' } };
+  } catch (error: any) {
+    return { id, success: false, error: error.message || String(error) };
+  }
+}
+
+export async function handleInputvalue(cmd: any, state: DaemonState): Promise<any> {
+  const id = cmd.id || '';
+  const selector = cmd.selector;
+  if (!selector || typeof selector !== 'string') {
+    return { id, success: false, error: "Missing 'selector' parameter" };
+  }
+  const mgr = state.browser;
+  if (!mgr) {
+    return { id, success: false, error: 'Browser not launched' };
+  }
+  const sessionId = mgr.activeSessionId?.() || '';
+  try {
+    const { objectId, effectiveSessionId } = await resolveElementObjectId(
+      mgr.client,
+      sessionId,
+      state.refMap,
+      selector,
+      state.iframeSessions
+    );
+    const result = await mgr.client.sendCommand(
+      'Runtime.callFunctionOn',
+      {
+        functionDeclaration: 'function() { return this.value ?? ""; }',
+        objectId,
+        returnByValue: true,
+        awaitPromise: false,
+      },
+      effectiveSessionId
+    );
+    const value = result?.result?.value;
+    return { id, success: true, data: { value: value === undefined || value === null ? '' : String(value) } };
+  } catch (error: any) {
+    return { id, success: false, error: error.message || String(error) };
+  }
+}
+
+export async function handleBoundingbox(cmd: any, state: DaemonState): Promise<any> {
+  const id = cmd.id || '';
+  const selector = cmd.selector;
+  if (!selector || typeof selector !== 'string') {
+    return { id, success: false, error: "Missing 'selector' parameter" };
+  }
+  const mgr = state.browser;
+  if (!mgr) {
+    return { id, success: false, error: 'Browser not launched' };
+  }
+  const sessionId = mgr.activeSessionId?.() || '';
+  try {
+    const { objectId, effectiveSessionId } = await resolveElementObjectId(
+      mgr.client,
+      sessionId,
+      state.refMap,
+      selector,
+      state.iframeSessions
+    );
+    const result = await mgr.client.sendCommand(
+      'Runtime.callFunctionOn',
+      {
+        functionDeclaration: `function() {
+          const r = this.getBoundingClientRect();
+          return { x: r.x, y: r.y, width: r.width, height: r.height };
+        }`,
+        objectId,
+        returnByValue: true,
+        awaitPromise: false,
+      },
+      effectiveSessionId
+    );
+    return { id, success: true, data: { box: result?.result?.value || null } };
+  } catch (error: any) {
+    return { id, success: false, error: error.message || String(error) };
+  }
+}
+
+export async function handleStyles(cmd: any, state: DaemonState): Promise<any> {
+  const id = cmd.id || '';
+  const selector = cmd.selector;
+  if (!selector || typeof selector !== 'string') {
+    return { id, success: false, error: "Missing 'selector' parameter" };
+  }
+  const mgr = state.browser;
+  if (!mgr) {
+    return { id, success: false, error: 'Browser not launched' };
+  }
+  const sessionId = mgr.activeSessionId?.() || '';
+  try {
+    const { objectId, effectiveSessionId } = await resolveElementObjectId(
+      mgr.client,
+      sessionId,
+      state.refMap,
+      selector,
+      state.iframeSessions
+    );
+    const result = await mgr.client.sendCommand(
+      'Runtime.callFunctionOn',
+      {
+        functionDeclaration: `function() {
+          const s = window.getComputedStyle(this);
+          return {
+            display: s.display,
+            visibility: s.visibility,
+            opacity: s.opacity,
+            position: s.position,
+            width: s.width,
+            height: s.height,
+            color: s.color,
+            backgroundColor: s.backgroundColor
+          };
+        }`,
+        objectId,
+        returnByValue: true,
+        awaitPromise: false,
+      },
+      effectiveSessionId
+    );
+    return { id, success: true, data: { styles: result?.result?.value || {} } };
+  } catch (error: any) {
+    return { id, success: false, error: error.message || String(error) };
+  }
+}
+
 // Element utility functions
 
 async function resolveElementObjectId(
