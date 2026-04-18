@@ -233,6 +233,10 @@ async function killStaleDaemon(session: string): Promise<void> {
   cleanupStaleFiles(session);
 }
 
+export async function forceStopDaemon(session: string): Promise<void> {
+  await killStaleDaemon(session);
+}
+
 async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -145,6 +145,14 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     }
   }
 
+  if (cmd.tabId && state.browser && action !== 'tab_switch' && action !== 'tab_list' && action !== 'tab_new') {
+    try {
+      state.browser.setActivePageByTargetId?.(cmd.tabId);
+    } catch (error: any) {
+      return errorResponse(id, error?.message || `Tab not found: ${cmd.tabId}`);
+    }
+  }
+
   // WebDriver backend: reject unsupported actions
   if (state.backendType === 'webdriver') {
     const unsupportedActions = [
@@ -183,6 +191,8 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
   const lifecycle = await import('./lifecycle.js');
   const snapshot = await import('./snapshot.js');
   const persistence = await import('./persistence.js');
+  const tabs = await import('./tabs.js');
+  const evaluate = await import('./evaluate.js');
 
   switch (action) {
     // Browser lifecycle
@@ -321,13 +331,17 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Tabs
     case 'tab_list':
-      return errorResponse(id, 'tab_list handler not yet implemented');
+    case 'listTabs':
+      return tabs.handleTabList(cmd, state);
     case 'tab_new':
-      return errorResponse(id, 'tab_new handler not yet implemented');
+    case 'newTab':
+      return tabs.handleTabNew(cmd, state);
     case 'tab_switch':
-      return errorResponse(id, 'tab_switch handler not yet implemented');
+    case 'switchTab':
+      return tabs.handleTabSwitch(cmd, state);
     case 'tab_close':
-      return errorResponse(id, 'tab_close handler not yet implemented');
+    case 'closeTab':
+      return tabs.handleTabClose(cmd, state);
 
     // Frames
     case 'frame':
@@ -365,7 +379,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // JavaScript evaluation
     case 'evaluate':
-      return errorResponse(id, 'evaluate handler not yet implemented');
+      return evaluate.handleEvaluate(cmd, state);
     case 'evalhandle':
       return errorResponse(id, 'evalhandle handler not yet implemented');
 

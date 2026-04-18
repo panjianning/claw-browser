@@ -634,6 +634,19 @@ export class BrowserManager {
     return [...this.pages];
   }
 
+  public pageCount(): number {
+    return this.pages.length;
+  }
+
+  public tabList(): Array<{ id: string; title: string; url: string; active: boolean }> {
+    return this.pages.map((p, index) => ({
+      id: p.targetId,
+      title: p.title,
+      url: p.url,
+      active: index === this.activePageIndex,
+    }));
+  }
+
   public getActivePage(): PageInfo | undefined {
     return this.pages[this.activePageIndex];
   }
@@ -641,6 +654,14 @@ export class BrowserManager {
   public setActivePage(index: number): void {
     if (index < 0 || index >= this.pages.length) {
       throw new Error(`Invalid page index: ${index}`);
+    }
+    this.activePageIndex = index;
+  }
+
+  public setActivePageByTargetId(tabId: string): void {
+    const index = this.pages.findIndex((p) => p.targetId === tabId);
+    if (index === -1) {
+      throw new Error(`Tab not found: ${tabId}`);
     }
     this.activePageIndex = index;
   }
@@ -681,6 +702,43 @@ export class BrowserManager {
     // Adjust active page index if needed
     if (this.activePageIndex >= this.pages.length && this.pages.length > 0) {
       this.activePageIndex = this.pages.length - 1;
+    }
+  }
+
+  public async closePageByIndex(index: number): Promise<void> {
+    if (index < 0 || index >= this.pages.length) {
+      throw new Error(`Invalid tab index: ${index}`);
+    }
+    await this.closePage(this.pages[index].targetId);
+  }
+
+  public updatePageTargetInfo(targetInfo: Partial<PageInfo> & { targetId?: string; title?: string; url?: string }): void {
+    if (!targetInfo.targetId) {
+      return;
+    }
+    const page = this.pages.find((p) => p.targetId === targetInfo.targetId);
+    if (!page) {
+      return;
+    }
+    if (typeof targetInfo.title === 'string') {
+      page.title = targetInfo.title;
+    }
+    if (typeof targetInfo.url === 'string') {
+      page.url = targetInfo.url;
+    }
+  }
+
+  public removePageByTargetId(targetId: string): void {
+    const index = this.pages.findIndex((p) => p.targetId === targetId);
+    if (index === -1) {
+      return;
+    }
+    this.pages.splice(index, 1);
+    if (this.activePageIndex >= this.pages.length && this.pages.length > 0) {
+      this.activePageIndex = this.pages.length - 1;
+    }
+    if (this.pages.length === 0) {
+      this.activePageIndex = 0;
     }
   }
 }

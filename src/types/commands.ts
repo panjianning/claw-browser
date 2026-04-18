@@ -248,4 +248,5 @@ export interface Flags {
   cliAnnotate?: boolean;
   headed?: boolean;
   cdp?: string;
+  tabId?: string;
 }

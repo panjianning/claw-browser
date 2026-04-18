@@ -33,6 +33,20 @@ export function parseCommand(args: string[], flags: Flags = {}): Command {
     result.timeout = flags.defaultTimeout;
   }
 
+  if (flags.tabId) {
+    const skipTabBinding = new Set([
+      'launch',
+      'close',
+      'tab_switch',
+      'tab_list',
+      'tab_new',
+      'tab_close',
+    ]);
+    if (!skipTabBinding.has(result.action)) {
+      result.tabId = flags.tabId;
+    }
+  }
+
   return result;
 }
 
@@ -433,29 +447,51 @@ function parseCommandInner(args: string[], flags: Flags): Command {
         : { id, action: 'loadState' };
     }
 
+    // === JavaScript evaluation ===
+    case 'evaluate':
+    case 'eval': {
+      if (rest.length === 0) {
+        throw new MissingArgumentsError(cmd, `${cmd} <script>`);
+      }
+      return { id, action: 'evaluate', script: rest.join(' ') };
+    }
+
     // === Tabs ===
+    case 'tab':
     case 'tabs': {
       const sub = rest[0];
 
       if (!sub || sub === 'list') {
-        return { id, action: 'listTabs' };
+        return { id, action: 'tab_list' };
       } else if (sub === 'new') {
         const url = rest[1];
-        return url ? { id, action: 'newTab', url } : { id, action: 'newTab' };
+        return url ? { id, action: 'tab_new', url } : { id, action: 'tab_new' };
       } else if (sub === 'close') {
-        const index = rest[1] ? parseInt(rest[1], 10) : undefined;
-        return { id, action: 'closeTab', index };
+        const target = rest[1];
+        if (!target) {
+          return { id, action: 'tab_close' };
+        }
+        if (/^\d+$/.test(target)) {
+          const index = parseInt(target, 10);
+          return { id, action: 'tab_close', index };
+        }
+        return { id, action: 'tab_close', tabId: target };
       } else if (sub === 'switch') {
         if (rest.length < 2) {
-          throw new MissingArgumentsError('tabs switch', 'tabs switch <index>');
+          throw new MissingArgumentsError('tab switch', 'tab switch <index|tab-id>');
         }
-        const index = parseInt(rest[1], 10);
-        if (isNaN(index)) {
-          throw new InvalidValueError('Tab index must be a number', 'tabs switch <index>');
+        const target = rest[1];
+        if (/^\d+$/.test(target)) {
+          const index = parseInt(target, 10);
+          return { id, action: 'tab_switch', index };
         }
-        return { id, action: 'switchTab', index };
+        return { id, action: 'tab_switch', tabId: target };
       } else {
-        throw new UnknownSubcommandError(sub, ['list', 'new', 'close', 'switch']);
+        if (/^\d+$/.test(sub)) {
+          const numeric = parseInt(sub, 10);
+          return { id, action: 'tab_switch', index: numeric };
+        }
+        throw new UnknownSubcommandError(sub, ['list', 'new', 'close', 'switch', '<index>']);
       }
     }
 

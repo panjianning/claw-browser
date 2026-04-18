@@ -80,7 +80,7 @@ export async function handleNavigate(cmd: any, state: DaemonState): Promise<any>
     // Invalid URL, skip tracking
   }
 
-  return { id, success: true, data: { url: newUrl, title } };
+  return { id, success: true, data: { url: newUrl, title, tabId: mgr.activeTargetId?.() || '' } };
 }
 
 export async function handleUrl(cmd: any, state: DaemonState): Promise<any> {

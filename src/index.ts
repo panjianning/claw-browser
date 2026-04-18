@@ -63,15 +63,63 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
   if (action === 'navigate') {
     const title = typeof data.title === 'string' ? data.title.trim() : '';
     const url = typeof data.url === 'string' ? data.url : '';
+    const tabId = typeof data.tabId === 'string' ? data.tabId : '';
     if (title.length > 0 && url.length > 0) {
       console.log(`✓ ${title}`);
       console.log(`  ${url}`);
+      if (tabId) {
+        console.log(`  tab: ${tabId}`);
+      }
       return;
     }
     if (url.length > 0) {
       console.log(url);
+      if (tabId) {
+        console.log(`tab: ${tabId}`);
+      }
       return;
     }
+  }
+
+  if (action === 'tab_list' || action === 'listTabs') {
+    const tabs = Array.isArray(data.tabs) ? data.tabs : [];
+    for (let i = 0; i < tabs.length; i++) {
+      const tab = tabs[i] || {};
+      const marker = tab.active ? '→' : ' ';
+      const tabId = typeof tab.id === 'string' ? tab.id : '';
+      const title = typeof tab.title === 'string' && tab.title.length > 0 ? tab.title : 'Untitled';
+      const url = typeof tab.url === 'string' ? tab.url : '';
+      console.log(`${marker} [${i}] ${tabId} ${title} - ${url}`);
+    }
+    return;
+  }
+
+  if (action === 'tab_new' || action === 'newTab' || action === 'tab_switch' || action === 'switchTab') {
+    const tabId = typeof data.tabId === 'string' ? data.tabId : '';
+    const title = typeof data.title === 'string' ? data.title : '';
+    const url = typeof data.url === 'string' ? data.url : '';
+    if (tabId || title || url) {
+      if (title) {
+        console.log(`✓ ${title}`);
+      }
+      if (url) {
+        console.log(`  ${url}`);
+      }
+      if (tabId) {
+        console.log(`  tab: ${tabId}`);
+      }
+      return;
+    }
+  }
+
+  if (action === 'evaluate' && Object.prototype.hasOwnProperty.call(data, 'result')) {
+    const result = data.result;
+    if (typeof result === 'string') {
+      console.log(result);
+    } else {
+      console.log(JSON.stringify(result, null, 2));
+    }
+    return;
   }
 
   if (data && Object.keys(data).length > 0) {
@@ -204,6 +252,9 @@ function parseFlags(args: string[]): Flags {
     } else if (arg === '--cdp') {
       flags.cdp = args[i + 1];
       i++;
+    } else if (arg === '--tab-id') {
+      flags.tabId = args[i + 1];
+      i++;
     }
   }
 
@@ -326,10 +377,34 @@ async function main() {
     }
 
     try {
+      let gracefulStopped = false;
+
+      // Try graceful shutdown first so browser processes can close cleanly.
+      if (connection.daemonReady(session)) {
+        try {
+          const closeResponse = await connection.sendCommand(
+            {
+              id: `stop-${Date.now()}`,
+              action: 'close',
+            },
+            session
+          );
+          gracefulStopped = Boolean(closeResponse.success);
+        } catch {
+          // Fall through to force-stop path.
+        }
+      }
+
+      // If graceful close didn't work, force-stop daemon using PID fallback.
+      if (!gracefulStopped) {
+        await connection.forceStopDaemon(session);
+      }
+
+      // Always remove stale metadata files.
       connection.cleanupStaleFiles(session);
 
       if (jsonMode) {
-        printJsonValue({ success: true, session });
+        printJsonValue({ success: true, session, graceful: gracefulStopped });
       } else {
         console.log(`Stopped session '${session}'`);
       }
@@ -435,7 +510,8 @@ async function main() {
   const possibleCommand = cleanedArgs[0];
   const isCommand = ['navigate', 'open', 'goto', 'back', 'forward', 'reload',
                      'click', 'fill', 'type', 'hover', 'snapshot', 'screenshot',
-                     'close', 'cookies', 'storage', 'network'].includes(possibleCommand);
+                     'close', 'cookies', 'storage', 'network', 'tab', 'tabs',
+                     'eval', 'evaluate', 'wait', 'scroll'].includes(possibleCommand);
 
   let session: string;
   let commandArgs: string[];
@@ -543,6 +619,13 @@ COMMANDS:
   Information:
     snapshot                     Get accessibility tree
     screenshot [selector]        Take screenshot
+    eval, evaluate <script>      Evaluate JavaScript in current page
+
+  Tabs:
+    tab [list]                   List tabs
+    tab new [url]                Open a new tab (optionally navigate)
+    tab switch <index|tab-id>    Switch active tab
+    tab close [index|tab-id]     Close tab (default: active)
 
   Session:
     start <session>              Start daemon session
@@ -558,6 +641,9 @@ EXAMPLES:
   claw-browser open https://example.com
   claw-browser click "button[type='submit']"
   claw-browser snapshot
+  claw-browser eval "location.href"
+  claw-browser tab list
+  claw-browser --tab-id <tab-id> eval "document.title"
   claw-browser connect 9222
   claw-browser connect ws://127.0.0.1:9222/devtools/browser/abc123
 
