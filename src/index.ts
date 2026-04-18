@@ -204,6 +204,64 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
     return;
   }
 
+  if (action === 'console' && Array.isArray(data.messages)) {
+    for (const msg of data.messages) {
+      const level = typeof msg?.level === 'string' ? msg.level : 'log';
+      const text = typeof msg?.text === 'string' ? msg.text : '';
+      console.log(`[${level}] ${text}`);
+    }
+    return;
+  }
+
+  if (action === 'errors' && Array.isArray(data.errors)) {
+    for (const entry of data.errors) {
+      const text = typeof entry?.text === 'string' ? entry.text : '';
+      console.log(text);
+    }
+    return;
+  }
+
+  if (action === 'network_requests' && Array.isArray(data.requests)) {
+    for (const req of data.requests) {
+      const method = typeof req?.method === 'string' ? req.method : 'GET';
+      const url = typeof req?.url === 'string' ? req.url : '';
+      const status = typeof req?.status === 'number' ? ` ${req.status}` : '';
+      const requestId = typeof req?.requestId === 'string' ? req.requestId : '';
+      console.log(`[${requestId}] ${method} ${url}${status}`);
+    }
+    return;
+  }
+
+  if (action === 'dialog' && typeof data.hasDialog === 'boolean') {
+    if (!data.hasDialog) {
+      console.log('No dialog is currently open');
+      return;
+    }
+    const type = typeof data.type === 'string' ? data.type : 'unknown';
+    const message = typeof data.message === 'string' ? data.message : '';
+    console.log(`JavaScript ${type} dialog is open: "${message}"`);
+    return;
+  }
+
+  if ((action === 'stream_enable' || action === 'stream_status') && typeof data.enabled === 'boolean') {
+    if (!data.enabled) {
+      console.log('Streaming disabled');
+      return;
+    }
+    const port = typeof data.port === 'number' ? data.port : 'unknown';
+    const connected = typeof data.connected === 'boolean' ? data.connected : false;
+    const screencasting = typeof data.screencasting === 'boolean' ? data.screencasting : false;
+    console.log(`Streaming enabled on ws://127.0.0.1:${port}`);
+    console.log(`Connected: ${connected}`);
+    console.log(`Screencasting: ${screencasting}`);
+    return;
+  }
+
+  if (action === 'stream_disable' && data.disabled === true) {
+    console.log('Streaming disabled');
+    return;
+  }
+
   if (data && Object.keys(data).length > 0) {
     console.log(JSON.stringify(data, null, 2));
   }
@@ -673,9 +731,9 @@ async function main() {
     'click', 'dblclick', 'focus', 'fill', 'type', 'setvalue', 'press', 'key', 'keyboard', 'keydown', 'keyup',
     'hover', 'select', 'check', 'uncheck', 'scroll', 'scrollintoview', 'scrollinto', 'drag', 'upload',
     'snapshot', 'screenshot', 'pdf', 'get', 'is', 'find', 'wait', 'mouse',
-    'cookies', 'storage', 'network', 'set',
+    'cookies', 'storage', 'network', 'set', 'route', 'unroute', 'console', 'errors',
     'tab', 'tabs', 'window', 'frame', 'dialog',
-    'state', 'eval', 'evaluate', 'site', 'close', 'quit', 'exit',
+    'state', 'eval', 'evaluate', 'inspect', 'responsebody', 'bringtofront', 'highlight', 'selectall', 'clipboard', 'site', 'close', 'quit', 'exit',
     'session', 'profiles'
   ].includes(possibleCommand);
 
@@ -827,10 +885,15 @@ COMMANDS:
     hover <selector>             Hover over element
 
   Information:
-    snapshot                     Get accessibility tree
+    snapshot [options]           Get accessibility tree
     screenshot [selector]        Take screenshot
     eval, evaluate <script>      Evaluate JavaScript in current page
+    get <field>                  Get text/html/value/attr/title/url/count/box/styles
+    is <field> <selector>        visible/enabled/checked
+    find <kind> <q> <action>     Find then act (click/fill/type/gettext/count)
     site <subcommand>            Manage and run site adapters
+    console [--clear]            Show console messages
+    errors [--clear]             Show runtime errors
 
   Tabs:
     tab                          List tabs (shows short id, tabId, and optional label)
@@ -849,6 +912,17 @@ COMMANDS:
     profiles                     List local Chrome profiles
 
   Misc:
+    frame <selector>             Scope to iframe
+    frame main                   Return to main frame
+    dialog <status|accept|dismiss> Manage JS dialogs
+    route <pattern>              Add request route
+    unroute [pattern]            Remove route(s)
+    network requests             Show tracked requests
+    network request <id>         Show one request
+    responsebody <id>            Get response body for request
+    inspect                      Print current CDP endpoint
+    highlight <selector>         Highlight an element
+    clipboard <read|write>       Clipboard read/write
     help                         Show this help
     version                      Show version
 
@@ -860,6 +934,14 @@ EXAMPLES:
   claw-browser eval "location.href"
   claw-browser snapshot -i -u
   claw-browser snapshot -s "#main" -d 4
+  claw-browser set media dark
+  claw-browser set timezone Asia/Shanghai
+  claw-browser set locale zh-CN
+  claw-browser set geo 31.2304 121.4737
+  claw-browser set content "<h1>Hello</h1>"
+  claw-browser find text "Sign in" click
+  claw-browser network requests --method GET
+  claw-browser dialog status
   claw-browser site list
   claw-browser site xhs/note --note_id 123
   claw-browser tab list

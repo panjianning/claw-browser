@@ -38,8 +38,6 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
   const action = cmd.action || '';
   const id = cmd.id || '';
 
-  const cmdStart = Date.now();
-
   // Broadcast command to stream server
   if (state.streamServer) {
     state.streamServer.broadcastCommand(action, id, cmd);
@@ -195,6 +193,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
   const evaluate = await import('./evaluate.js');
   const queries = await import('./queries.js');
   const sessionData = await import('./session-data.js');
+  const advanced = await import('./advanced.js');
 
   switch (action) {
     // Browser lifecycle
@@ -227,7 +226,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'screenshot':
       return snapshot.handleScreenshot(cmd, state);
     case 'pdf':
-      return errorResponse(id, 'pdf handler not yet implemented');
+      return advanced.handlePdf(cmd, state);
 
     // Element interactions
     case 'click':
@@ -253,9 +252,9 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'focus':
       return interactions.handleFocus(cmd, state);
     case 'clear':
-      return errorResponse(id, 'clear handler not yet implemented');
+      return interactions.handleFill({ ...cmd, value: '' }, state);
     case 'tap':
-      return errorResponse(id, 'tap handler not yet implemented');
+      return advanced.handleTap(cmd, state);
     case 'drag':
       return interactions.handleDrag(cmd, state);
 
@@ -283,23 +282,17 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Locators
     case 'getbyrole':
-      return errorResponse(id, 'getbyrole handler not yet implemented');
     case 'getbytext':
-      return errorResponse(id, 'getbytext handler not yet implemented');
     case 'getbylabel':
-      return errorResponse(id, 'getbylabel handler not yet implemented');
     case 'getbyplaceholder':
-      return errorResponse(id, 'getbyplaceholder handler not yet implemented');
     case 'getbyalttext':
-      return errorResponse(id, 'getbyalttext handler not yet implemented');
     case 'getbytitle':
-      return errorResponse(id, 'getbytitle handler not yet implemented');
     case 'getbytestid':
-      return errorResponse(id, 'getbytestid handler not yet implemented');
+      return advanced.handleGetBy(cmd, state);
     case 'nth':
-      return errorResponse(id, 'nth handler not yet implemented');
+      return advanced.handleNth(cmd, state);
     case 'find':
-      return errorResponse(id, 'find handler not yet implemented');
+      return advanced.handleFind(cmd, state);
 
     // Wait operations
     case 'wait': {
@@ -333,7 +326,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'keyup':
       return interactions.handleKeyup(cmd, state);
     case 'wheel':
-      return errorResponse(id, 'wheel handler not yet implemented');
+      return interactions.handleMouse({ ...cmd, event: 'wheel' }, state);
 
     // Tabs
     case 'tab_list':
@@ -353,9 +346,9 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Frames
     case 'frame':
-      return errorResponse(id, 'frame handler not yet implemented');
+      return advanced.handleFrame(cmd, state);
     case 'mainframe':
-      return errorResponse(id, 'mainframe handler not yet implemented');
+      return advanced.handleMainFrame(cmd, state);
 
     // Cookies and storage
     case 'cookies_get':
@@ -373,7 +366,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Network
     case 'setcontent':
-      return errorResponse(id, 'setcontent handler not yet implemented');
+      return advanced.handleSetContent(cmd, state);
     case 'headers':
       return sessionData.handleSetHeaders(cmd, state);
     case 'offline':
@@ -381,58 +374,58 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Console and errors
     case 'console':
-      return errorResponse(id, 'console handler not yet implemented');
+      return advanced.handleConsole(cmd, state);
     case 'errors':
-      return errorResponse(id, 'errors handler not yet implemented');
+      return advanced.handleErrors(cmd, state);
 
     // JavaScript evaluation
     case 'evaluate':
       return evaluate.handleEvaluate(cmd, state);
     case 'evalhandle':
-      return errorResponse(id, 'evalhandle handler not yet implemented');
+      return evaluate.handleEvalHandle(cmd, state);
 
     // HAR recording
     case 'har_start':
-      return errorResponse(id, 'har_start handler not yet implemented');
+      return advanced.handleHarStart(cmd, state);
     case 'har_stop':
-      return errorResponse(id, 'har_stop handler not yet implemented');
+      return advanced.handleHarStop(cmd, state);
 
     // Route interception
     case 'route':
-      return errorResponse(id, 'route handler not yet implemented');
+      return advanced.handleRoute(cmd, state);
     case 'unroute':
-      return errorResponse(id, 'unroute handler not yet implemented');
+      return advanced.handleUnroute(cmd, state);
     case 'network_requests':
-      return errorResponse(id, 'network requests listing is not yet implemented');
+      return advanced.handleNetworkRequests(cmd, state);
     case 'network_request':
-      return errorResponse(id, 'network request detail is not yet implemented');
+      return advanced.handleNetworkRequest(cmd, state);
 
     // Download management
     case 'download':
-      return errorResponse(id, 'download handler not yet implemented');
+      return advanced.handleDownload(cmd, state);
 
     // Media and viewport
     case 'viewport':
       return sessionData.handleSetViewport(cmd, state);
     case 'useragent':
     case 'user_agent':
-      return errorResponse(id, 'useragent handler not yet implemented');
+      return advanced.handleUserAgent(cmd, state);
     case 'set_media':
-      return errorResponse(id, 'set_media handler not yet implemented');
+      return advanced.handleSetMedia(cmd, state);
     case 'device':
-      return errorResponse(id, 'device handler not yet implemented');
+      return advanced.handleDevice(cmd, state);
     case 'timezone':
-      return errorResponse(id, 'timezone handler not yet implemented');
+      return advanced.handleTimezone(cmd, state);
     case 'locale':
-      return errorResponse(id, 'locale handler not yet implemented');
+      return advanced.handleLocale(cmd, state);
     case 'geolocation':
-      return errorResponse(id, 'geolocation handler not yet implemented');
+      return advanced.handleGeolocation(cmd, state);
     case 'permissions':
-      return errorResponse(id, 'permissions handler not yet implemented');
+      return advanced.handlePermissions(cmd, state);
 
     // Dialogs
     case 'dialog':
-      return errorResponse(id, 'dialog handler not yet implemented');
+      return advanced.handleDialog(cmd, state);
 
     // State persistence
     case 'state_save': {
@@ -443,7 +436,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
       try {
         const path = await persistence.saveState(state.browser.client, sessionId, {
           path: cmd.path,
-          sessionName: state.sessionName,
+          sessionName: state.sessionName || undefined,
           sessionIdStr: cmd.sessionId,
           visitedOrigins: state.visitedOrigins,
         });
@@ -486,37 +479,38 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Tracing
     case 'trace_start':
-      return errorResponse(id, 'trace_start handler not yet implemented');
+      return advanced.handleTraceStart(cmd, state);
     case 'trace_stop':
-      return errorResponse(id, 'trace_stop handler not yet implemented');
+      return advanced.handleTraceStop(cmd, state);
     case 'profiler_start':
-      return errorResponse(id, 'profiler_start handler not yet implemented');
+      return advanced.handleProfilerStart(cmd, state);
     case 'profiler_stop':
-      return errorResponse(id, 'profiler_stop handler not yet implemented');
+      return advanced.handleProfilerStop(cmd, state);
 
     // Recording
     case 'recording_start':
-      return errorResponse(id, 'recording_start handler not yet implemented');
+      return advanced.handleRecordingStart(cmd, state);
     case 'recording_stop':
-      return errorResponse(id, 'recording_stop handler not yet implemented');
+      return advanced.handleRecordingStop(cmd, state);
     case 'recording_restart':
-      return errorResponse(id, 'recording_restart handler not yet implemented');
+      await advanced.handleRecordingStop(cmd, state);
+      return advanced.handleRecordingStart(cmd, state);
     case 'video_start':
-      return errorResponse(id, 'video_start handler not yet implemented');
+      return advanced.handleVideoStart(cmd, state);
     case 'video_stop':
-      return errorResponse(id, 'video_stop handler not yet implemented');
+      return advanced.handleVideoStop(cmd, state);
 
     // Streaming
     case 'stream_enable':
-      return errorResponse(id, 'stream_enable handler not yet implemented');
+      return advanced.handleStreamEnable(cmd, state);
     case 'stream_disable':
-      return errorResponse(id, 'stream_disable handler not yet implemented');
+      return advanced.handleStreamDisable(cmd, state);
     case 'stream_status':
-      return errorResponse(id, 'stream_status handler not yet implemented');
+      return advanced.handleStreamStatus(cmd, state);
     case 'screencast_start':
-      return errorResponse(id, 'screencast_start handler not yet implemented');
+      return advanced.handleScreencastStart(cmd, state);
     case 'screencast_stop':
-      return errorResponse(id, 'screencast_stop handler not yet implemented');
+      return advanced.handleScreencastStop(cmd, state);
 
     // Diff operations
     case 'diff_snapshot':
@@ -546,41 +540,41 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
 
     // Advanced actions
     case 'inspect':
-      return errorResponse(id, 'inspect handler not yet implemented');
+      return advanced.handleInspect(cmd, state);
     case 'selectall':
-      return errorResponse(id, 'selectall handler not yet implemented');
+      return advanced.handleSelectAll(cmd, state);
     case 'scrollintoview':
       return interactions.handleScrollIntoView(cmd, state);
     case 'dispatch':
-      return errorResponse(id, 'dispatch handler not yet implemented');
+      return advanced.handleDispatch(cmd, state);
     case 'highlight':
-      return errorResponse(id, 'highlight handler not yet implemented');
+      return advanced.handleHighlight(cmd, state);
     case 'setvalue':
-      return errorResponse(id, 'setvalue handler not yet implemented');
+      return interactions.handleFill({ ...cmd, value: cmd.value ?? cmd.text }, state);
     case 'styles':
       return queries.handleStyles(cmd, state);
     case 'bringtofront':
-      return errorResponse(id, 'bringtofront handler not yet implemented');
+      return advanced.handleBringToFront(cmd, state);
     case 'upload':
       return interactions.handleUpload(cmd, state);
     case 'addscript':
-      return errorResponse(id, 'addscript handler not yet implemented');
+      return advanced.handleAddScript(cmd, state);
     case 'addinitscript':
-      return errorResponse(id, 'addinitscript handler not yet implemented');
+      return advanced.handleAddInitScript(cmd, state);
     case 'addstyle':
-      return errorResponse(id, 'addstyle handler not yet implemented');
+      return advanced.handleAddStyle(cmd, state);
     case 'clipboard':
-      return errorResponse(id, 'clipboard handler not yet implemented');
+      return advanced.handleClipboard(cmd, state);
     case 'device_list':
-      return errorResponse(id, 'device_list handler not yet implemented');
+      return advanced.handleDeviceList(cmd, state);
     case 'expose':
       return errorResponse(id, 'expose handler not yet implemented');
     case 'pause':
-      return errorResponse(id, 'pause handler not yet implemented');
+      return advanced.handlePause(cmd, state);
     case 'multiselect':
       return errorResponse(id, 'multiselect handler not yet implemented');
     case 'responsebody':
-      return errorResponse(id, 'responsebody handler not yet implemented');
+      return advanced.handleResponseBody(cmd, state);
     case 'install':
       return errorResponse(id, 'install command is managed by the Rust agent-browser binary and is not implemented in claw-browser yet');
     case 'upgrade':
@@ -589,9 +583,9 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
       return errorResponse(id, 'chat command is not implemented in claw-browser yet');
     // Confirmation
     case 'confirm':
-      return errorResponse(id, 'confirm handler not yet implemented');
+      return advanced.handleConfirm(cmd, state);
     case 'deny':
-      return errorResponse(id, 'deny handler not yet implemented');
+      return advanced.handleDeny(cmd, state);
 
     default:
       return errorResponse(id, `Unknown action: ${action}`);

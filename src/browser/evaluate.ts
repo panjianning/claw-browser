@@ -40,6 +40,44 @@ export async function handleEvaluate(cmd: any, state: DaemonState): Promise<any>
   }
 }
 
+export async function handleEvalHandle(cmd: any, state: DaemonState): Promise<any> {
+  const id = cmd.id || '';
+  let script = cmd.script;
+
+  if (!script || typeof script !== 'string') {
+    return { id, success: false, error: "Missing 'script' parameter" };
+  }
+
+  const mgr = state.browser;
+  if (!mgr) {
+    return { id, success: false, error: 'Browser not launched' };
+  }
+
+  const sessionId = mgr.activeSessionId?.() || '';
+  try {
+    const result = await mgr.client.sendCommand(
+      'Runtime.evaluate',
+      {
+        expression: script,
+        returnByValue: false,
+        awaitPromise: true,
+      },
+      sessionId
+    );
+    const objectId = result?.result?.objectId;
+    if (!objectId) {
+      return { id, success: false, error: 'No handle returned (primitive result)' };
+    }
+    return { id, success: true, data: { objectId } };
+  } catch (error: any) {
+    return {
+      id,
+      success: false,
+      error: `Evaluation error: ${error?.message || String(error)}`,
+    };
+  }
+}
+
 async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) {
     return '';

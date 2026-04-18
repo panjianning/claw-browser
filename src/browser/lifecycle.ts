@@ -1,6 +1,7 @@
 import type { DaemonState } from './state.js';
 import { BrowserManager } from '../cdp/browser.js';
 import crypto from 'crypto';
+import { bindRuntimeEventTrackers } from './advanced.js';
 
 /**
  * Browser lifecycle action handlers (launch, close)
@@ -151,6 +152,7 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.browser = await BrowserManager.connect(cdpUrl);
     state.isCdpConnection = true;
     state.subscribeToEvents();
+    bindRuntimeEventTrackers(state);
     state.startFetchHandler();
     state.startDialogHandler();
     // TODO: state.updateStreamClient();
@@ -163,6 +165,7 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.browser = await BrowserManager.connect(`127.0.0.1:${cdpPort}`);
     state.isCdpConnection = true;
     state.subscribeToEvents();
+    bindRuntimeEventTrackers(state);
     state.startFetchHandler();
     state.startDialogHandler();
     // TODO: state.updateStreamClient();
@@ -176,6 +179,7 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     // state.browser = await connectAutoWithFreshTab();
     state.isCdpConnection = true;
     state.subscribeToEvents();
+    bindRuntimeEventTrackers(state);
     state.startFetchHandler();
     state.startDialogHandler();
     // TODO: state.updateStreamClient();
@@ -225,6 +229,7 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.launchHash = newHash;
     state.isCdpConnection = false;
     state.subscribeToEvents();
+    bindRuntimeEventTrackers(state);
     state.startFetchHandler();
     state.startDialogHandler();
     // TODO: state.updateStreamClient();

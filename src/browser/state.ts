@@ -388,7 +388,8 @@ export class DaemonState extends EventEmitter {
       const sessionId = params.sessionId || '';
 
       if (proxyCredentials) {
-        const [username, password] = proxyCredentials;
+        const username = proxyCredentials.username;
+        const password = proxyCredentials.password;
         await client.sendCommand(
           'Fetch.continueWithAuth',
           {
@@ -544,6 +545,12 @@ export class DaemonState extends EventEmitter {
     const handleDialog = async (params: any) => {
       const dialogType = params.type;
       const message = params.message || '';
+      this.pendingDialog = {
+        dialogType,
+        message,
+        url: params.url || '',
+        defaultPrompt: params.defaultPrompt || null,
+      };
 
       if (dialogType === 'beforeunload' || dialogType === 'alert') {
         console.error(`[auto-dismiss] ${dialogType} dialog: ${message}`);
@@ -554,6 +561,7 @@ export class DaemonState extends EventEmitter {
             { accept: true },
             sessionId
           );
+          this.pendingDialog = null;
         } catch (error) {
           console.error(`[auto-dismiss] failed to dismiss ${dialogType} dialog:`, error);
         }

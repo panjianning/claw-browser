@@ -4,7 +4,6 @@ import {
   UnknownCommandError,
   UnknownSubcommandError,
   InvalidValueError,
-  InvalidSessionNameError,
 } from '../types/commands.js';
 
 // Generate unique request ID
@@ -584,6 +583,10 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       return { id, action: 'route', pattern: rest[0] };
     }
 
+    case 'unroute': {
+      return rest[0] ? { id, action: 'unroute', pattern: rest[0] } : { id, action: 'unroute' };
+    }
+
     case 'network': {
       const sub = rest[0];
       if (!sub) {
@@ -771,7 +774,27 @@ function parseCommandInner(args: string[], flags: Flags): Command {
         if (rest.length < 3) throw new MissingArgumentsError('set geo', 'set geo <lat> <lng>');
         return { id, action: 'geolocation', latitude: parseFloat(rest[1]), longitude: parseFloat(rest[2]) };
       }
-      throw new UnknownSubcommandError(sub, ['viewport', 'offline', 'headers', 'media', 'credentials', 'device', 'geo']);
+      if (sub === 'timezone') {
+        if (!rest[1]) throw new MissingArgumentsError('set timezone', 'set timezone <timezoneId>');
+        return { id, action: 'timezone', timezoneId: rest[1] };
+      }
+      if (sub === 'locale') {
+        if (!rest[1]) throw new MissingArgumentsError('set locale', 'set locale <locale>');
+        return { id, action: 'locale', locale: rest[1] };
+      }
+      if (sub === 'permissions') {
+        if (rest.length < 2) throw new MissingArgumentsError('set permissions', 'set permissions <permission...>');
+        return { id, action: 'permissions', permissions: rest.slice(1) };
+      }
+      if (sub === 'content') {
+        if (rest.length < 2) throw new MissingArgumentsError('set content', 'set content <html>');
+        return { id, action: 'setcontent', html: rest.slice(1).join(' ') };
+      }
+      if (sub === 'useragent' || sub === 'user-agent') {
+        if (rest.length < 2) throw new MissingArgumentsError('set useragent', 'set useragent <ua>');
+        return { id, action: 'useragent', userAgent: rest.slice(1).join(' ') };
+      }
+      throw new UnknownSubcommandError(sub, ['viewport', 'offline', 'headers', 'media', 'credentials', 'device', 'geo', 'timezone', 'locale', 'permissions', 'content', 'useragent']);
     }
 
     case 'close':
@@ -883,6 +906,45 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       if (sub === 'status') return { id, action: 'dialog', op: 'status' };
       throw new UnknownSubcommandError(sub, ['accept', 'dismiss', 'status']);
     }
+
+    case 'console': {
+      return { id, action: 'console', clear: rest.includes('--clear') };
+    }
+
+    case 'errors': {
+      return { id, action: 'errors', clear: rest.includes('--clear') };
+    }
+
+    case 'inspect':
+      return { id, action: 'inspect' };
+
+    case 'highlight': {
+      if (!rest[0]) {
+        throw new MissingArgumentsError('highlight', 'highlight <selector>');
+      }
+      return { id, action: 'highlight', selector: rest[0] };
+    }
+
+    case 'selectall':
+      return { id, action: 'selectall' };
+
+    case 'clipboard': {
+      const op = rest[0];
+      if (!op) throw new MissingArgumentsError('clipboard', 'clipboard <read|write> [text]');
+      if (op === 'read') return { id, action: 'clipboard', op: 'read' };
+      if (op === 'write') return { id, action: 'clipboard', op: 'write', text: rest.slice(1).join(' ') };
+      throw new UnknownSubcommandError(op, ['read', 'write']);
+    }
+
+    case 'responsebody': {
+      if (!rest[0]) {
+        throw new MissingArgumentsError('responsebody', 'responsebody <requestId>');
+      }
+      return { id, action: 'responsebody', requestId: rest[0] };
+    }
+
+    case 'bringtofront':
+      return { id, action: 'bringtofront' };
 
     case 'find': {
       if (rest.length < 3) {
