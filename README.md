@@ -24,7 +24,6 @@ claw-browser click @e2
 claw-browser fill @e3 "hello"
 claw-browser get title
 claw-browser screenshot
-claw-browser close
 ```
 
 ## Core Commands
@@ -37,7 +36,6 @@ claw-browser type <selector-or-ref> <text>
 claw-browser snapshot
 claw-browser screenshot [path]
 claw-browser evaluate <script>
-claw-browser close
 ```
 
 Tabs:
@@ -130,5 +128,4 @@ Default: `2`.
 2. Daemon process maintains browser/session/tab state
 3. CDP layer executes browser actions
 4. Browser modules implement command handlers and output shaping
-
 

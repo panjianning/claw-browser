@@ -797,14 +797,6 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       throw new UnknownSubcommandError(sub, ['viewport', 'offline', 'headers', 'media', 'credentials', 'device', 'geo', 'timezone', 'locale', 'permissions', 'content', 'useragent']);
     }
 
-    case 'close':
-    case 'quit':
-    case 'exit':
-      if (rest.includes('--all')) {
-        return { id, action: 'close_all' };
-      }
-      return { id, action: 'close' };
-
     // === Tabs ===
     case 'tab':
     case 'tabs': {

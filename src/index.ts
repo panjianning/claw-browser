@@ -629,8 +629,7 @@ function printCommandHelp(args: string[]): boolean {
   const sub = (tokens[1] || '').toLowerCase();
   const topic = HELP_CATALOG[cmd];
   if (!topic) {
-    printHelp();
-    return true;
+    throw new Error(`Unknown command: ${cmd}`);
   }
 
   if (sub && topic.subcommands?.[sub]) {
@@ -685,8 +684,19 @@ async function main() {
 
   // Keep site-specific help dispatch in runSiteCli so adapter help still works:
   // claw-browser site <adapter> --help
-  if (cleanedArgs[0] !== 'site' && printCommandHelp(cleanedArgs)) {
-    return;
+  if (cleanedArgs[0] !== 'site') {
+    try {
+      if (printCommandHelp(cleanedArgs)) {
+        return;
+      }
+    } catch (e) {
+      if (jsonMode) {
+        printJsonError(e instanceof Error ? e.message : String(e));
+      } else {
+        console.error(e instanceof Error ? e.message : String(e));
+      }
+      process.exit(1);
+    }
   }
 
   if (cleanedArgs[0] === 'version' || cleanedArgs[0] === '--version' || cleanedArgs[0] === '-v') {
@@ -694,98 +704,6 @@ async function main() {
       printJsonValue({ success: true, version: VERSION });
     } else {
       console.log(`claw-browser v${VERSION}`);
-    }
-    return;
-  }
-
-  if (cleanedArgs[0] === 'start') {
-    // Start daemon session
-    const session = cleanedArgs[1] || defaultSession;
-
-    if (!isValidSessionName(session)) {
-      if (jsonMode) {
-        printJsonErrorWithType(
-          `Invalid session name: ${session}. Session names must not contain path separators or invalid characters`,
-          'InvalidSessionName'
-        );
-      } else {
-        console.error(`Invalid session name: ${session}`);
-      }
-      process.exit(1);
-    }
-
-    try {
-      const opts: connection.DaemonOptions = {
-        headed: flags.headed || false,
-        debug: process.env.CLAW_BROWSER_DEBUG === '1',
-        profile: flags.profile,
-      };
-
-      // Parse proxy if provided
-      if (flags.provider === 'proxy' && process.env.CLAW_BROWSER_PROXY) {
-        const parsed = parseProxy(process.env.CLAW_BROWSER_PROXY);
-        opts.proxy = parsed.server;
-        opts.proxyUsername = parsed.username;
-        opts.proxyPassword = parsed.password;
-      }
-
-      const result = await connection.ensureDaemon(session, opts, VERSION);
-
-      if (jsonMode) {
-        printJsonValue({
-          success: true,
-          session,
-          alreadyRunning: result.alreadyRunning,
-        });
-      } else {
-        if (result.alreadyRunning) {
-          console.log(`Session '${session}' is already running`);
-        } else {
-          console.log(`Started session '${session}'`);
-        }
-      }
-    } catch (e) {
-      if (jsonMode) {
-        printJsonError(e instanceof Error ? e.message : String(e));
-      } else {
-        console.error(`Failed to start session: ${e instanceof Error ? e.message : String(e)}`);
-      }
-      process.exit(1);
-    }
-    return;
-  }
-
-  if (cleanedArgs[0] === 'stop') {
-    // Stop daemon session
-    const session = cleanedArgs[1] || defaultSession;
-
-    if (!isValidSessionName(session)) {
-      if (jsonMode) {
-        printJsonErrorWithType(
-          `Invalid session name: ${session}`,
-          'InvalidSessionName'
-        );
-      } else {
-        console.error(`Invalid session name: ${session}`);
-      }
-      process.exit(1);
-    }
-
-    try {
-      const gracefulStopped = await stopSession(session);
-
-      if (jsonMode) {
-        printJsonValue({ success: true, session, graceful: gracefulStopped });
-      } else {
-        console.log(`Stopped session '${session}'`);
-      }
-    } catch (e) {
-      if (jsonMode) {
-        printJsonError(e instanceof Error ? e.message : String(e));
-      } else {
-        console.error(`Failed to stop session: ${e instanceof Error ? e.message : String(e)}`);
-      }
-      process.exit(1);
     }
     return;
   }
@@ -927,18 +845,138 @@ async function main() {
       }
       return;
     }
+    if (sub === 'start') {
+      const session = cleanedArgs[2] || defaultSession;
+
+      if (!isValidSessionName(session)) {
+        if (jsonMode) {
+          printJsonErrorWithType(
+            `Invalid session name: ${session}. Session names must not contain path separators or invalid characters`,
+            'InvalidSessionName'
+          );
+        } else {
+          console.error(`Invalid session name: ${session}`);
+        }
+        process.exit(1);
+      }
+
+      try {
+        const opts: connection.DaemonOptions = {
+          headed: flags.headed || false,
+          debug: process.env.CLAW_BROWSER_DEBUG === '1',
+          profile: flags.profile,
+        };
+
+        if (flags.provider === 'proxy' && process.env.CLAW_BROWSER_PROXY) {
+          const parsed = parseProxy(process.env.CLAW_BROWSER_PROXY);
+          opts.proxy = parsed.server;
+          opts.proxyUsername = parsed.username;
+          opts.proxyPassword = parsed.password;
+        }
+
+        const result = await connection.ensureDaemon(session, opts, VERSION);
+
+        if (jsonMode) {
+          printJsonValue({
+            success: true,
+            session,
+            alreadyRunning: result.alreadyRunning,
+          });
+        } else {
+          if (result.alreadyRunning) {
+            console.log(`Session '${session}' is already running`);
+          } else {
+            console.log(`Started session '${session}'`);
+          }
+        }
+      } catch (e) {
+        if (jsonMode) {
+          printJsonError(e instanceof Error ? e.message : String(e));
+        } else {
+          console.error(`Failed to start session: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        process.exit(1);
+      }
+      return;
+    }
+    if (sub === 'stop') {
+      const session = cleanedArgs[2] || defaultSession;
+
+      if (!isValidSessionName(session)) {
+        if (jsonMode) {
+          printJsonErrorWithType(
+            `Invalid session name: ${session}`,
+            'InvalidSessionName'
+          );
+        } else {
+          console.error(`Invalid session name: ${session}`);
+        }
+        process.exit(1);
+      }
+
+      try {
+        const gracefulStopped = await stopSession(session);
+
+        if (jsonMode) {
+          printJsonValue({ success: true, session, graceful: gracefulStopped });
+        } else {
+          console.log(`Stopped session '${session}'`);
+        }
+      } catch (e) {
+        if (jsonMode) {
+          printJsonError(e instanceof Error ? e.message : String(e));
+        } else {
+          console.error(`Failed to stop session: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        process.exit(1);
+      }
+      return;
+    }
+    if (sub === 'stop_all') {
+      try {
+        const active = connection.listActiveSessions();
+        const results: Array<{ session: string; success: boolean; error?: string }> = [];
+        for (const s of active) {
+          try {
+            await stopSession(s);
+            results.push({ session: s, success: true });
+          } catch (err: any) {
+            results.push({ session: s, success: false, error: err?.message || String(err) });
+          }
+        }
+        if (jsonMode) {
+          printJsonValue({ success: results.every((r) => r.success), data: { stopped: results } });
+        } else {
+          for (const r of results) {
+            if (r.success) {
+              console.log(`Stopped session '${r.session}'`);
+            } else {
+              console.error(`Failed to stop session '${r.session}': ${r.error}`);
+            }
+          }
+        }
+      } catch (e) {
+        if (jsonMode) {
+          printJsonError(e instanceof Error ? e.message : String(e));
+        } else {
+          console.error(`Failed to stop sessions: ${e instanceof Error ? e.message : String(e)}`);
+        }
+        process.exit(1);
+      }
+      return;
+    }
     if (!sub) {
       if (jsonMode) {
-        printJsonError('Missing session subcommand. Use: session list');
+        printJsonError('Missing session subcommand. Use: session <start|stop|stop_all|list>');
       } else {
-        console.error('Missing session subcommand. Use: session list');
+        console.error('Missing session subcommand. Use: session <start|stop|stop_all|list>');
       }
       process.exit(1);
     }
     if (jsonMode) {
-      printJsonError('Unknown session subcommand. Use: session list');
+      printJsonError('Unknown session subcommand. Use: session <start|stop|stop_all|list>');
     } else {
-      console.error('Unknown session subcommand. Use: session list');
+      console.error('Unknown session subcommand. Use: session <start|stop|stop_all|list>');
     }
     process.exit(1);
   }
@@ -989,31 +1027,6 @@ async function main() {
       cdp: flags.cdp,
       profile: flags.profile,
     };
-    if (command.action === 'close_all') {
-      const active = connection.listActiveSessions();
-      const results: Array<{ session: string; success: boolean; error?: string }> = [];
-      for (const s of active) {
-        try {
-          await stopSession(s);
-          results.push({ session: s, success: true });
-        } catch (err: any) {
-          results.push({ session: s, success: false, error: err?.message || String(err) });
-        }
-      }
-      if (jsonMode) {
-        printJsonValue({ success: results.every((r) => r.success), data: { stopped: results } });
-      } else {
-        for (const r of results) {
-          if (r.success) {
-            console.log(`Stopped session '${r.session}'`);
-          } else {
-            console.error(`Failed to stop session '${r.session}': ${r.error}`);
-          }
-        }
-      }
-      return;
-    }
-
     await connection.ensureDaemon(session, opts, VERSION);
 
     // Send command

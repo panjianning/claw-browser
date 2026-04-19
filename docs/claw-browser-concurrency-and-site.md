@@ -41,8 +41,8 @@
 
 常用入口：
 
-- `claw-browser start <session>`
-- `claw-browser stop <session>`
+- `claw-browser session start <session>`
+- `claw-browser session stop <session>`
 - `claw-browser --session <session> <command> ...`
 
 daemon 就绪由会话级 IPC 文件体现：

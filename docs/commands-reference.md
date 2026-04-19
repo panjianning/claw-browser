@@ -35,8 +35,9 @@ claw-browser --session <name> <command> [args...]
 
 - `help`, `--help`, `-h`
 - `version`, `--version`, `-v`
-- `start [session]`
-- `stop [session]`
+- `session start [session]`
+- `session stop [session]`
+- `session stop_all`
 - `connect <port|url> [session]`
 - `session list`
 - `profiles`
@@ -221,12 +222,7 @@ Notes:
 - Adapter metadata is discovered from local and community adapter folders.
 - If adapter has a `domain` and no `--tab-id` is provided, domain tab pool logic is used.
 
-## Close commands
-
-- `close`
-- `quit` (alias)
-- `exit` (alias)
-- `close --all` (stop all active sessions)
+Use `session stop_all` to stop all active sessions.
 
 ## Parsed but not implemented (current TS runtime)
 
