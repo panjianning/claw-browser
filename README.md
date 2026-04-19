@@ -2,17 +2,10 @@
 
 A TypeScript implementation of `vercel-labs/agent-browser`, optimized for persistent session management and concurrent multi-tab operations.
 
-## Install and Build
+## Install
 
-```bash
-npm install
-npm run build
-```
-
-Run from source:
-
-```bash
-node ./dist/index.js --help
+``` bash
+npm install -g claw-browser
 ```
 
 ## Quick Start
@@ -25,6 +18,37 @@ claw-browser fill @e3 "hello"
 claw-browser get title
 claw-browser screenshot
 ```
+
+## Google Workflow (Recommended)
+
+When you run multiple tabs concurrently, always bind each action with `--tab-id` so commands do not hit the wrong tab.
+
+```bash
+# 1) Create a tab (same URL behavior as open: "google.com" will become "https://google.com")
+claw-browser tab new google.com
+
+# 2) Get the tab id from tab list (or from "tab new" output)
+claw-browser tab list
+
+# 3) Inspect page and collect refs
+claw-browser --tab-id <tab-id-or-prefix> snapshot -i
+
+# 4) Interact on the exact tab
+claw-browser --tab-id <tab-id-or-prefix> fill "@e21" "text"
+claw-browser --tab-id <tab-id-or-prefix> press Enter
+# or click the button ref instead of pressing Enter
+claw-browser --tab-id <tab-id-or-prefix> click "@e17"
+
+# 5) Observe results
+claw-browser --tab-id <tab-id-or-prefix> get title
+claw-browser --tab-id <tab-id-or-prefix> eval "document.body.innerText"
+```
+
+Notes:
+
+- In PowerShell, quote refs like `"@e21"` to avoid parser issues.
+- `--tab-id` supports unique prefix matching (for example `3896AD`).
+- If multiple tabs share the same prefix, command fails with an "ambiguous prefix" error; use a longer prefix or full tab id.
 
 ## Core Commands
 
@@ -45,6 +69,12 @@ claw-browser tab list
 claw-browser tab new [url]
 claw-browser tab <tN|label|tab-id>
 claw-browser tab close [tN|label|tab-id]
+```
+
+For multi-tab or concurrent agent usage, prefer:
+
+```bash
+claw-browser --tab-id <tab-id-or-prefix> <command> ...
 ```
 
 Wait:
@@ -129,3 +159,16 @@ Default: `2`.
 3. CDP layer executes browser actions
 4. Browser modules implement command handlers and output shaping
 
+
+## Dev
+
+```bash
+npm install
+npm run build
+```
+
+Run from source:
+
+```bash
+node ./dist/index.js --help
+```

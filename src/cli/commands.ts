@@ -64,6 +64,23 @@ function parseTabSelector(value: string): { index?: number; tabId?: string; shor
   return { label: trimmed };
 }
 
+function normalizeUrlLikeOpen(input: string): string {
+  const trimmed = input.trim();
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.startsWith('http://') ||
+    lower.startsWith('https://') ||
+    lower.startsWith('about:') ||
+    lower.startsWith('data:') ||
+    lower.startsWith('file:') ||
+    lower.startsWith('chrome-extension://') ||
+    lower.startsWith('chrome://')
+  ) {
+    return trimmed;
+  }
+  return `https://${trimmed}`;
+}
+
 function parseCommandInner(args: string[], flags: Flags): Command {
   if (args.length === 0) {
     throw new MissingArgumentsError('', '<command> [args...]');
@@ -86,21 +103,7 @@ function parseCommandInner(args: string[], flags: Flags): Command {
       if (rest.length === 0) {
         throw new MissingArgumentsError(cmd, 'open <url>');
       }
-      let url = rest[0];
-      const urlLower = url.toLowerCase();
-
-      // Add https:// if no protocol specified
-      if (
-        !urlLower.startsWith('http://') &&
-        !urlLower.startsWith('https://') &&
-        !urlLower.startsWith('about:') &&
-        !urlLower.startsWith('data:') &&
-        !urlLower.startsWith('file:') &&
-        !urlLower.startsWith('chrome-extension://') &&
-        !urlLower.startsWith('chrome://')
-      ) {
-        url = `https://${url}`;
-      }
+      const url = normalizeUrlLikeOpen(rest[0]);
 
       const navCmd: Command = { id, action: 'navigate', url };
 
@@ -829,7 +832,7 @@ function parseCommandInner(args: string[], flags: Flags): Command {
           cmd.label = label;
         }
         if (url) {
-          cmd.url = url;
+          cmd.url = normalizeUrlLikeOpen(url);
         }
         return cmd;
       } else if (sub === 'close') {
@@ -871,7 +874,7 @@ function parseCommandInner(args: string[], flags: Flags): Command {
           continue;
         }
         if (!cmd.url && !arg.startsWith('-')) {
-          cmd.url = arg;
+          cmd.url = normalizeUrlLikeOpen(arg);
         }
         i++;
       }
