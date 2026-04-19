@@ -200,9 +200,11 @@ async function startTcpServer(
   preferredPort: number,
   session: string
 ): Promise<net.Server> {
+  const executeSerialized = createSerializedExecutor(state);
+
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
-      handleConnection(socket, state);
+      handleConnection(socket, executeSerialized);
     });
 
     // Try preferred port first
@@ -237,9 +239,11 @@ async function startUnixServer(
   state: DaemonState,
   socketPath: string
 ): Promise<net.Server> {
+  const executeSerialized = createSerializedExecutor(state);
+
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
-      handleConnection(socket, state);
+      handleConnection(socket, executeSerialized);
     });
 
     server.listen(socketPath, () => {
@@ -253,7 +257,10 @@ async function startUnixServer(
 /**
  * Handle incoming IPC connection
  */
-async function handleConnection(socket: net.Socket, state: DaemonState): Promise<void> {
+async function handleConnection(
+  socket: net.Socket,
+  executeSerialized: (cmd: any) => Promise<any>
+): Promise<void> {
   let buffer = '';
 
   socket.on('data', async (data) => {
@@ -269,7 +276,7 @@ async function handleConnection(socket: net.Socket, state: DaemonState): Promise
 
       try {
         const cmd = JSON.parse(line);
-        const result = await executeCommand(cmd, state);
+        const result = await executeSerialized(cmd);
         socket.write(JSON.stringify(result) + '\n');
 
         // Handle close command
@@ -298,4 +305,31 @@ async function handleConnection(socket: net.Socket, state: DaemonState): Promise
   socket.on('end', () => {
     // Connection closed
   });
+}
+
+/**
+ * Serialize command execution across all IPC connections.
+ * This mirrors the Rust daemon behavior where a single state mutex
+ * ensures commands execute one-by-one.
+ */
+function createSerializedExecutor(
+  state: DaemonState
+): (cmd: any) => Promise<any> {
+  let tail: Promise<void> = Promise.resolve();
+
+  return async (cmd: any): Promise<any> => {
+    const previous = tail;
+    let release!: () => void;
+
+    tail = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+
+    await previous;
+    try {
+      return await executeCommand(cmd, state);
+    } finally {
+      release();
+    }
+  };
 }
