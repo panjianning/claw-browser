@@ -625,27 +625,11 @@ async function main() {
 
       const daemonResult = await connection.ensureDaemon(session, opts, VERSION);
 
-      // Keep connect idempotent: if daemon is already running, do not force
-      // another launch/reconnect cycle that may disrupt an active CDP session.
-      if (daemonResult.alreadyRunning) {
-        if (jsonMode) {
-          printJsonValue({
-            success: true,
-            session,
-            cdp: cdpArg,
-            connected: true,
-            reused: true,
-          });
-        } else {
-          console.log('Done');
-        }
-        return;
-      }
-
       const launchResponse = await connection.sendCommand(
         {
           id: `connect-${Date.now()}`,
           action: 'launch',
+          cdpTargetRaw: cdpArg,
           ...cdpTarget,
         },
         session
@@ -655,14 +639,34 @@ async function main() {
         throw new Error(launchResponse.error || 'Failed to connect to CDP');
       }
 
+      const launchData =
+        launchResponse.data && typeof launchResponse.data === 'object'
+          ? (launchResponse.data as {
+              reused?: boolean;
+              switchedFromManaged?: boolean;
+              switchedExternalTarget?: boolean;
+            })
+          : undefined;
+      const reused = Boolean(daemonResult.alreadyRunning || launchData?.reused);
+      const switchedFromManaged = Boolean(launchData?.switchedFromManaged);
+      const switchedExternalTarget = Boolean(launchData?.switchedExternalTarget);
+
       if (jsonMode) {
         printJsonValue({
           success: true,
           session,
           cdp: cdpArg,
           connected: true,
+          reused,
+          switchedFromManaged,
+          switchedExternalTarget,
         });
       } else {
+        if (switchedFromManaged) {
+          console.log('Switched from managed browser to external CDP endpoint.');
+        } else if (switchedExternalTarget) {
+          console.log('Switched to requested external CDP endpoint.');
+        }
         console.log('Done');
       }
     } catch (e) {

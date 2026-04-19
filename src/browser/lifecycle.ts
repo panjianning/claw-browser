@@ -96,13 +96,42 @@ function parseCdpTarget(raw: string): { cdpPort?: number; cdpUrl?: string } {
   return { cdpUrl: value };
 }
 
+function deriveExternalTargetKey(
+  cdpUrl: string | undefined,
+  cdpPort: number | undefined,
+  cdpTargetRaw: string | undefined
+): string | null {
+  if (typeof cdpTargetRaw === 'string' && cdpTargetRaw.trim().length > 0) {
+    return cdpTargetRaw.trim();
+  }
+  if (typeof cdpPort === 'number') {
+    return String(cdpPort);
+  }
+  if (typeof cdpUrl === 'string' && cdpUrl.trim().length > 0) {
+    return cdpUrl.trim();
+  }
+  return null;
+}
+
 export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   const envCdp = process.env.CLAW_BROWSER_CDP?.trim();
   const parsedEnvCdp = envCdp ? parseCdpTarget(envCdp) : {};
   const cdpUrl = cmd.cdpUrl || parsedEnvCdp.cdpUrl;
   const cdpPort = cmd.cdpPort || parsedEnvCdp.cdpPort;
+  const cdpTargetRaw =
+    typeof cmd.cdpTargetRaw === 'string' && cmd.cdpTargetRaw.trim().length > 0
+      ? cmd.cdpTargetRaw.trim()
+      : envCdp;
   const autoConnect = cmd.autoConnect || false;
+  const requestedExternalTarget = deriveExternalTargetKey(cdpUrl, cdpPort, cdpTargetRaw);
+  const isExternal = Boolean(cdpUrl || cdpPort || autoConnect);
+  const wasExternal = state.isCdpConnection;
+  const targetChanged =
+    isExternal &&
+    wasExternal &&
+    requestedExternalTarget !== null &&
+    state.externalTargetKey !== requestedExternalTarget;
 
   const launchOptions = parseLaunchOptions(cmd);
   const newHash = launchHash(launchOptions);
@@ -113,23 +142,26 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
       return true;
     }
 
-    const isExternal = cdpUrl || cdpPort || autoConnect;
-    const wasExternal = state.isCdpConnection;
     const hashChanged = !isExternal && state.launchHash !== newHash;
 
     return (
       isExternal !== wasExternal ||
+      targetChanged ||
       hashChanged ||
       state.hasProcessExited() ||
       !(await state.isConnectionAlive())
     );
   })();
 
+  const switchedFromManaged = needsRelaunch && Boolean(state.browser && !wasExternal && isExternal);
+  const switchedExternalTarget = needsRelaunch && Boolean(state.browser && wasExternal && targetChanged);
+
   if (needsRelaunch) {
     if (state.browser) {
       await state.browser.close();
       state.browser = null;
       state.launchHash = null;
+      state.externalTargetKey = null;
       state.screencasting = false;
       state.resetInputState();
       // TODO: state.updateStreamClient();
@@ -151,12 +183,17 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.resetInputState();
     state.browser = await BrowserManager.connect(cdpUrl);
     state.isCdpConnection = true;
+    state.externalTargetKey = requestedExternalTarget;
     state.subscribeToEvents();
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();
     state.startDialogHandler();
     // TODO: state.updateStreamClient();
-    return { id, success: true, data: { launched: true } };
+    return {
+      id,
+      success: true,
+      data: { launched: true, switchedFromManaged, switchedExternalTarget },
+    };
   }
 
   // CDP port connection
@@ -164,12 +201,17 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.resetInputState();
     state.browser = await BrowserManager.connect(`127.0.0.1:${cdpPort}`);
     state.isCdpConnection = true;
+    state.externalTargetKey = requestedExternalTarget;
     state.subscribeToEvents();
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();
     state.startDialogHandler();
     // TODO: state.updateStreamClient();
-    return { id, success: true, data: { launched: true } };
+    return {
+      id,
+      success: true,
+      data: { launched: true, switchedFromManaged, switchedExternalTarget },
+    };
   }
 
   // Auto-connect to existing Chrome instance
@@ -178,6 +220,7 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     // TODO: Implement connect_auto_with_fresh_tab
     // state.browser = await connectAutoWithFreshTab();
     state.isCdpConnection = true;
+    state.externalTargetKey = requestedExternalTarget;
     state.subscribeToEvents();
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();
@@ -228,6 +271,7 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.browser = await BrowserManager.launch(launchOptions);
     state.launchHash = newHash;
     state.isCdpConnection = false;
+    state.externalTargetKey = null;
     state.subscribeToEvents();
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();

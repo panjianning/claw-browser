@@ -200,6 +200,8 @@ export class DaemonState extends EventEmitter {
 
   // Is CDP connection (vs launched browser)
   isCdpConnection = false;
+  // Last requested external CDP target key for connect target change detection.
+  externalTargetKey: string | null = null;
 
   // Background tasks
   private fetchHandlerTask: any | null = null;
