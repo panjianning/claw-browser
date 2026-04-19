@@ -170,6 +170,9 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     'stream_disable',
     'stream_status',
     'session_status',
+    'flow_list',
+    'flow_show',
+    'flow_delete',
   ].includes(action);
 
   if (!skipLaunch) {
@@ -272,6 +275,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
   const queries = await import('./queries.js');
   const sessionData = await import('./session-data.js');
   const advanced = await import('./advanced.js');
+  const flow = await import('./flow.js');
 
   switch (action) {
     // Browser lifecycle
@@ -554,6 +558,20 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
         return errorResponse(id, error.message || String(error));
       }
     }
+
+    // Flow recording and replay
+    case 'flow_record':
+      return flow.handleFlowRecord(cmd, state);
+    case 'flow_stop':
+      return flow.handleFlowStop(cmd, state);
+    case 'flow_list':
+      return flow.handleFlowList(cmd, state);
+    case 'flow_show':
+      return flow.handleFlowShow(cmd, state);
+    case 'flow_run':
+      return flow.handleFlowRun(cmd, state);
+    case 'flow_delete':
+      return flow.handleFlowDelete(cmd, state);
 
     // Tracing
     case 'trace_start':

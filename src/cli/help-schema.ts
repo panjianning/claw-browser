@@ -165,6 +165,17 @@ export const HELP_CATALOG: Record<string, HelpTopic> = {
       clean: { usage: 'claw-browser [global options] state clean --older-than <days>' },
     },
   },
+  flow: {
+    usage: 'claw-browser [global options] flow <record|stop|list|show|run|delete> ...',
+    subcommands: {
+      record: { usage: 'claw-browser [global options] flow record <name> [--url <url>]' },
+      stop: { usage: 'claw-browser [global options] flow stop' },
+      list: { usage: 'claw-browser [global options] flow list' },
+      show: { usage: 'claw-browser [global options] flow show <name>' },
+      run: { usage: 'claw-browser [global options] flow run <name> [--var key=value] [--close-tab]' },
+      delete: { usage: 'claw-browser [global options] flow delete <name>' },
+    },
+  },
   tab: {
     usage: 'claw-browser [global options] tab [list|new|close|switch|<target>] ...',
     description: 'Target formats: tN | <label> | <tab-id>',
@@ -280,6 +291,7 @@ export const HELP_OVERVIEW_SECTIONS: HelpOverviewSection[] = [
       { command: 'site <subcommand>', summary: 'Manage and run site adapters' },
       { command: 'console [--clear]', summary: 'Show console messages' },
       { command: 'errors [--clear]', summary: 'Show runtime errors' },
+      { command: 'flow <subcommand>', summary: 'Record and run reusable browser workflows' },
     ],
   },
   {
@@ -353,6 +365,10 @@ export const HELP_EXAMPLES = {
     'claw-browser dialog status',
     'claw-browser site list',
     'claw-browser site xhs/note --note_id 123',
+    'claw-browser flow record login-demo --url https://example.com/login',
+    'claw-browser flow stop',
+    'claw-browser flow run login-demo --var username=alice --var password=secret --close-tab',
+    'claw-browser flow list',
     'claw-browser tab list',
     'claw-browser tab new --label docs https://claw-browser.dev',
     'claw-browser tab t2',

@@ -40,6 +40,7 @@ export function parseCommand(args: string[], flags: Flags = {}): Command {
       'tab_list',
       'tab_new',
       'tab_close',
+      'flow_run',
     ]);
     if (!skipTabBinding.has(result.action)) {
       result.tabId = flags.tabId;
@@ -79,6 +80,26 @@ function normalizeUrlLikeOpen(input: string): string {
     return trimmed;
   }
   return `https://${trimmed}`;
+}
+
+function parseFlowVars(args: string[]): Record<string, string> {
+  const vars: Record<string, string> = {};
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (arg !== '--var') continue;
+    const pair = i + 1 < args.length ? args[i + 1] : '';
+    if (!pair || !pair.includes('=')) {
+      continue;
+    }
+    const eq = pair.indexOf('=');
+    const key = pair.slice(0, eq).trim();
+    const value = pair.slice(eq + 1);
+    if (key.length > 0) {
+      vars[key] = value;
+    }
+    i++;
+  }
+  return vars;
 }
 
 function parseCommandInner(args: string[], flags: Flags): Command {
@@ -674,6 +695,59 @@ function parseCommandInner(args: string[], flags: Flags): Command {
         return { id, action: 'state_clean', olderThanDays: parseInt(rest[idx + 1], 10) };
       }
       throw new UnknownSubcommandError(sub, ['save', 'load', 'list', 'show', 'rename', 'clear', 'clean']);
+    }
+
+    // === Flow ===
+    case 'flow': {
+      const sub = rest[0];
+      if (!sub) {
+        throw new MissingArgumentsError('flow', 'flow <record|stop|list|show|run|delete> ...');
+      }
+      if (sub === 'record') {
+        if (!rest[1]) {
+          throw new MissingArgumentsError('flow record', 'flow record <name> [--url <url>]');
+        }
+        const cmd: Command = { id, action: 'flow_record', name: rest[1] };
+        const urlIdx = rest.findIndex((arg) => arg === '--url');
+        if (urlIdx !== -1 && urlIdx + 1 < rest.length) {
+          cmd.url = normalizeUrlLikeOpen(rest[urlIdx + 1]);
+        }
+        return cmd;
+      }
+      if (sub === 'stop') {
+        return { id, action: 'flow_stop' };
+      }
+      if (sub === 'list') {
+        return { id, action: 'flow_list' };
+      }
+      if (sub === 'show') {
+        if (!rest[1]) {
+          throw new MissingArgumentsError('flow show', 'flow show <name>');
+        }
+        return { id, action: 'flow_show', name: rest[1] };
+      }
+      if (sub === 'delete') {
+        if (!rest[1]) {
+          throw new MissingArgumentsError('flow delete', 'flow delete <name>');
+        }
+        return { id, action: 'flow_delete', name: rest[1] };
+      }
+      if (sub === 'run') {
+        if (!rest[1]) {
+          throw new MissingArgumentsError('flow run', 'flow run <name> [--var key=value] [--close-tab]');
+        }
+        const cmd: Command = { id, action: 'flow_run', name: rest[1] };
+        const runArgs = rest.slice(2);
+        const vars = parseFlowVars(runArgs);
+        if (Object.keys(vars).length > 0) {
+          cmd.vars = vars;
+        }
+        if (runArgs.includes('--close-tab')) {
+          cmd.closeTab = true;
+        }
+        return cmd;
+      }
+      throw new UnknownSubcommandError(sub, ['record', 'stop', 'list', 'show', 'run', 'delete']);
     }
 
     // === JavaScript evaluation ===

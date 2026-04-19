@@ -414,6 +414,52 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
     return;
   }
 
+  if (action === 'flow_record' && data.recording === true) {
+    const name = typeof data.name === 'string' ? data.name : '';
+    console.log(`Flow recording started: ${name}`);
+    return;
+  }
+
+  if (action === 'flow_stop') {
+    const name = typeof data.name === 'string' ? data.name : '';
+    const steps = typeof data.steps === 'number' ? data.steps : 0;
+    const p = typeof data.path === 'string' ? data.path : '';
+    console.log(`Flow saved: ${name} (${steps} steps)`);
+    if (p) console.log(`  ${p}`);
+    return;
+  }
+
+  if (action === 'flow_list' && Array.isArray(data.flows)) {
+    if (data.flows.length === 0) {
+      console.log('No flows.');
+      return;
+    }
+    for (const flow of data.flows) {
+      const name = typeof flow?.name === 'string' ? flow.name : '';
+      const steps = typeof flow?.steps === 'number' ? flow.steps : 0;
+      const updatedAt = typeof flow?.updatedAt === 'string' ? flow.updatedAt : '';
+      console.log(`${name} (${steps} steps)${updatedAt ? ` updated ${updatedAt}` : ''}`);
+    }
+    return;
+  }
+
+  if (action === 'flow_run' && data.ran === true) {
+    const name = typeof data.name === 'string' ? data.name : '';
+    const steps = typeof data.steps === 'number' ? data.steps : 0;
+    const tabId = typeof data.tabId === 'string' ? data.tabId : '';
+    console.log(`Flow succeeded: ${name} (${steps} steps)`);
+    if (tabId) {
+      console.log(`  tab: ${tabId}`);
+    }
+    return;
+  }
+
+  if (action === 'flow_delete' && data.deleted === true) {
+    const name = typeof data.name === 'string' ? data.name : '';
+    console.log(`Flow deleted: ${name}`);
+    return;
+  }
+
   if (data && Object.keys(data).length > 0) {
     console.log(JSON.stringify(data, null, 2));
   }
