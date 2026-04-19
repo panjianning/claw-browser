@@ -171,9 +171,28 @@ export async function handlePress(cmd: any, state: DaemonState): Promise<any> {
   }
   const sessionId = mgr.activeSessionId?.() || '';
   const parsed = parseKeyChord(key);
-  const params: any = { key: parsed.actualKey, code: parsed.code, modifiers: parsed.modifiers };
+  const params: any = {
+    key: parsed.actualKey,
+    code: parsed.code,
+    modifiers: parsed.modifiers,
+    windowsVirtualKeyCode: parsed.windowsVirtualKeyCode,
+    nativeVirtualKeyCode: parsed.nativeVirtualKeyCode,
+    text: parsed.text,
+    unmodifiedText: parsed.unmodifiedText,
+  };
   await mgr.client.sendCommand('Input.dispatchKeyEvent', { ...params, type: 'keyDown' }, sessionId);
-  await mgr.client.sendCommand('Input.dispatchKeyEvent', { ...params, type: 'keyUp' }, sessionId);
+  await mgr.client.sendCommand(
+    'Input.dispatchKeyEvent',
+    {
+      key: parsed.actualKey,
+      code: parsed.code,
+      modifiers: parsed.modifiers,
+      windowsVirtualKeyCode: parsed.windowsVirtualKeyCode,
+      nativeVirtualKeyCode: parsed.nativeVirtualKeyCode,
+      type: 'keyUp',
+    },
+    sessionId
+  );
   return { id, success: true, data: { pressed: key } };
 }
 
@@ -185,7 +204,20 @@ export async function handleKeydown(cmd: any, state: DaemonState): Promise<any> 
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
   const sessionId = mgr.activeSessionId?.() || '';
   const parsed = parseKeyChord(key);
-  await mgr.client.sendCommand('Input.dispatchKeyEvent', { type: 'keyDown', key: parsed.actualKey, code: parsed.code, modifiers: parsed.modifiers }, sessionId);
+  await mgr.client.sendCommand(
+    'Input.dispatchKeyEvent',
+    {
+      type: 'keyDown',
+      key: parsed.actualKey,
+      code: parsed.code,
+      modifiers: parsed.modifiers,
+      windowsVirtualKeyCode: parsed.windowsVirtualKeyCode,
+      nativeVirtualKeyCode: parsed.nativeVirtualKeyCode,
+      text: parsed.text,
+      unmodifiedText: parsed.unmodifiedText,
+    },
+    sessionId
+  );
   return { id, success: true, data: { keyDown: key } };
 }
 
@@ -197,7 +229,18 @@ export async function handleKeyup(cmd: any, state: DaemonState): Promise<any> {
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
   const sessionId = mgr.activeSessionId?.() || '';
   const parsed = parseKeyChord(key);
-  await mgr.client.sendCommand('Input.dispatchKeyEvent', { type: 'keyUp', key: parsed.actualKey, code: parsed.code, modifiers: parsed.modifiers }, sessionId);
+  await mgr.client.sendCommand(
+    'Input.dispatchKeyEvent',
+    {
+      type: 'keyUp',
+      key: parsed.actualKey,
+      code: parsed.code,
+      modifiers: parsed.modifiers,
+      windowsVirtualKeyCode: parsed.windowsVirtualKeyCode,
+      nativeVirtualKeyCode: parsed.nativeVirtualKeyCode,
+    },
+    sessionId
+  );
   return { id, success: true, data: { keyUp: key } };
 }
 
@@ -435,10 +478,48 @@ export async function handleMouse(cmd: any, state: DaemonState): Promise<any> {
   return { id, success: false, error: `Unsupported mouse event: ${event}` };
 }
 
-function parseKeyChord(input: string): { actualKey: string; modifiers?: number; code?: string } {
+type ParsedKeyChord = {
+  actualKey: string;
+  modifiers?: number;
+  code?: string;
+  windowsVirtualKeyCode?: number;
+  nativeVirtualKeyCode?: number;
+  text?: string;
+  unmodifiedText?: string;
+};
+
+const SPECIAL_KEY_DEFS: Record<
+  string,
+  { key: string; code: string; keyCode: number; text?: string }
+> = {
+  enter: { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
+  return: { key: 'Enter', code: 'Enter', keyCode: 13, text: '\r' },
+  tab: { key: 'Tab', code: 'Tab', keyCode: 9, text: '\t' },
+  esc: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  escape: { key: 'Escape', code: 'Escape', keyCode: 27 },
+  backspace: { key: 'Backspace', code: 'Backspace', keyCode: 8 },
+  delete: { key: 'Delete', code: 'Delete', keyCode: 46 },
+  insert: { key: 'Insert', code: 'Insert', keyCode: 45 },
+  home: { key: 'Home', code: 'Home', keyCode: 36 },
+  end: { key: 'End', code: 'End', keyCode: 35 },
+  pageup: { key: 'PageUp', code: 'PageUp', keyCode: 33 },
+  pagedown: { key: 'PageDown', code: 'PageDown', keyCode: 34 },
+  arrowup: { key: 'ArrowUp', code: 'ArrowUp', keyCode: 38 },
+  arrowdown: { key: 'ArrowDown', code: 'ArrowDown', keyCode: 40 },
+  arrowleft: { key: 'ArrowLeft', code: 'ArrowLeft', keyCode: 37 },
+  arrowright: { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 },
+  space: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
+  spacebar: { key: ' ', code: 'Space', keyCode: 32, text: ' ' },
+};
+
+function parseKeyChord(input: string): ParsedKeyChord {
   const parts = input.split('+');
   let modifiers = 0;
-  let actualKey = parts[parts.length - 1];
+  const rawKey = (parts[parts.length - 1] || '').trim();
+  if (!rawKey) {
+    throw new Error('Missing key value');
+  }
+
   for (let i = 0; i < parts.length - 1; i++) {
     const lower = parts[i].toLowerCase();
     if (lower === 'alt') modifiers |= 1;
@@ -446,8 +527,89 @@ function parseKeyChord(input: string): { actualKey: string; modifiers?: number; 
     if (lower === 'meta' || lower === 'cmd' || lower === 'command') modifiers |= 4;
     if (lower === 'shift') modifiers |= 8;
   }
-  const code = actualKey.length === 1 ? `Key${actualKey.toUpperCase()}` : actualKey;
-  return modifiers > 0 ? { actualKey, modifiers, code } : { actualKey, code };
+
+  const special = SPECIAL_KEY_DEFS[rawKey.toLowerCase()];
+  if (special) {
+    return modifiers > 0
+      ? {
+          actualKey: special.key,
+          code: special.code,
+          modifiers,
+          windowsVirtualKeyCode: special.keyCode,
+          nativeVirtualKeyCode: special.keyCode,
+          text: special.text,
+          unmodifiedText: special.text,
+        }
+      : {
+          actualKey: special.key,
+          code: special.code,
+          windowsVirtualKeyCode: special.keyCode,
+          nativeVirtualKeyCode: special.keyCode,
+          text: special.text,
+          unmodifiedText: special.text,
+        };
+  }
+
+  if (rawKey.length === 1) {
+    const ch = rawKey;
+    const lower = ch.toLowerCase();
+    const upper = ch.toUpperCase();
+    const isLetter = /[a-z]/i.test(ch);
+    const isDigit = /[0-9]/.test(ch);
+    const keyCode = upper.charCodeAt(0);
+    const code = isLetter ? `Key${upper}` : isDigit ? `Digit${ch}` : undefined;
+    const text = modifiers & 7 ? undefined : ch;
+    return modifiers > 0
+      ? {
+          actualKey: isLetter ? upper : ch,
+          code,
+          modifiers,
+          windowsVirtualKeyCode: keyCode,
+          nativeVirtualKeyCode: keyCode,
+          text,
+          unmodifiedText: text,
+        }
+      : {
+          actualKey: isLetter ? upper : ch,
+          code,
+          windowsVirtualKeyCode: keyCode,
+          nativeVirtualKeyCode: keyCode,
+          text,
+          unmodifiedText: text,
+        };
+  }
+
+  if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(rawKey)) {
+    const num = parseInt(rawKey.slice(1), 10);
+    const keyCode = 111 + num;
+    const normalized = `F${num}`;
+    return modifiers > 0
+      ? {
+          actualKey: normalized,
+          code: normalized,
+          modifiers,
+          windowsVirtualKeyCode: keyCode,
+          nativeVirtualKeyCode: keyCode,
+        }
+      : {
+          actualKey: normalized,
+          code: normalized,
+          windowsVirtualKeyCode: keyCode,
+          nativeVirtualKeyCode: keyCode,
+        };
+  }
+
+  if (/^(shift|control|ctrl|alt|meta|cmd|command)$/i.test(rawKey)) {
+    const normalized = rawKey.toLowerCase();
+    if (normalized === 'shift') return { actualKey: 'Shift', code: 'ShiftLeft', modifiers };
+    if (normalized === 'control' || normalized === 'ctrl') return { actualKey: 'Control', code: 'ControlLeft', modifiers };
+    if (normalized === 'alt') return { actualKey: 'Alt', code: 'AltLeft', modifiers };
+    return { actualKey: 'Meta', code: 'MetaLeft', modifiers };
+  }
+
+  throw new Error(
+    `Unknown key: ${rawKey}. Use a single character or a known key name such as Enter, Escape, Tab, ArrowUp, F1-F24.`
+  );
 }
 
 async function toggleChecked(cmd: any, state: DaemonState, targetChecked: boolean): Promise<any> {
