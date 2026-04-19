@@ -1,14 +1,12 @@
 # claw-browser
 
-TypeScript implementation of the vercels `vercel-labs/agent-browser` CLI protocol.
-
-Goal: keep command and response compatibility with `agent-browser` where practical, while closing migration gaps incrementally.
+A TypeScript implementation of `vercel-labs/agent-browser`, optimized for persistent session management and concurrent multi-tab operations.
 
 ## Install and Build
 
 ```bash
-pnpm install
-pnpm run build
+npm install
+npm run build
 ```
 
 Run from source:
@@ -133,6 +131,4 @@ Default: `2`.
 3. CDP layer executes browser actions
 4. Browser modules implement command handlers and output shaping
 
-## License
 
-Apache-2.0
