@@ -67,7 +67,7 @@ function parseLaunchOptions(cmd: any): LaunchOptions {
       cmd.proxy?.password ||
       process.env.CLAW_BROWSER_PROXY_PASSWORD ||
       undefined,
-    profile: cmd.profile || undefined,
+    profile: cmd.profile || process.env.CLAW_BROWSER_PROFILE || undefined,
     allowFileAccess: cmd.allowFileAccess || false,
     args: cmd.args
       ? Array.isArray(cmd.args)

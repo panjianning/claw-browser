@@ -557,9 +557,19 @@ export class BrowserManager {
 
     this.client.close();
 
-    // Kill Chrome process if we launched it.
+    // Give Chrome a chance to flush profile/cookies on graceful close.
     if (this.chromeProcess) {
-      this.chromeProcess.kill();
+      const deadline = Date.now() + 3000;
+      while (!this.chromeProcess.hasExited() && Date.now() < deadline) {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+    }
+
+    // Force kill only if still alive.
+    if (this.chromeProcess) {
+      if (!this.chromeProcess.hasExited()) {
+        this.chromeProcess.kill();
+      }
     }
   }
 

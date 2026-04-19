@@ -1,10 +1,8 @@
 # claw-browser
 
-TypeScript implementation of the `claw-browser` CLI protocol.
+TypeScript implementation of the vercels `vercel-labs/agent-browser` CLI protocol.
 
-Goal: keep command and response compatibility with `claw-browser` where practical, while closing migration gaps incrementally.
-
-Migration tracker: [MIGRATION_STATUS.md](./MIGRATION_STATUS.md)
+Goal: keep command and response compatibility with `agent-browser` where practical, while closing migration gaps incrementally.
 
 ## Install and Build
 
@@ -69,12 +67,18 @@ Each session runs a background daemon and keeps isolated browser state.
 - Default session: `default`
 - Session switch: `claw-browser --session <name> ...`
 - Runtime files: `~/.claw-browser/`
+- Default browser user data dir (when `--profile` is not set): `~/.claw-browser/browser/<session>`
 
 Key files:
 
 - `<session>.pid`
 - `<session>.sock` (Unix) or `<session>.port` (Windows)
 - `<session>.version`
+
+Notes:
+
+- `--profile <path>` sets Chrome `--user-data-dir` to the provided path.
+- Without `--profile`, `claw-browser` now uses a persistent per-session profile at `~/.claw-browser/browser/<session>`.
 
 ## Site Adapters
 

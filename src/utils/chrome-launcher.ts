@@ -1,7 +1,6 @@
 import { spawn, ChildProcess } from 'child_process';
-import { randomUUID } from 'crypto';
 import { mkdirSync, rmSync, readFileSync, unlinkSync } from 'fs';
-import { tmpdir } from 'os';
+import { homedir } from 'os';
 import path from 'path';
 import { findChrome } from './chrome-finder.js';
 
@@ -37,6 +36,12 @@ interface ChromeArgs {
   args: string[];
   userDataDir: string;
   tempUserDataDir?: string;
+}
+
+function resolveDefaultUserDataDir(): string {
+  const rawSession = (process.env.CLAW_BROWSER_SESSION || 'default').trim();
+  const session = rawSession.length > 0 ? rawSession : 'default';
+  return path.join(homedir(), '.claw-browser', 'browser', session);
 }
 
 function buildChromeArgs(options: LaunchOptions): ChromeArgs {
@@ -85,11 +90,10 @@ function buildChromeArgs(options: LaunchOptions): ChromeArgs {
     // Expand tilde
     userDataDir = options.profile.replace(/^~/, process.env.HOME || process.env.USERPROFILE || '');
   } else {
-    // Create temp profile
-    userDataDir = path.join(tmpdir(), `claw-browser-chrome-${randomUUID()}`);
-    mkdirSync(userDataDir, { recursive: true });
-    tempUserDataDir = userDataDir;
+    // Use a persistent default profile for better session continuity.
+    userDataDir = resolveDefaultUserDataDir();
   }
+  mkdirSync(userDataDir, { recursive: true });
 
   args.push(`--user-data-dir=${userDataDir}`);
 
@@ -198,7 +202,7 @@ export async function launchChrome(options: LaunchOptions = {}): Promise<ChromeP
       child.kill('SIGTERM');
       // Give it a moment to exit gracefully
       setTimeout(() => {
-        if (!child.killed) {
+        if (child.exitCode === null) {
           child.kill('SIGKILL');
         }
       }, 1000);
