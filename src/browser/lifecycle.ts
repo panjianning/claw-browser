@@ -27,6 +27,45 @@ interface LaunchOptions {
   useRealKeychain?: boolean;
 }
 
+function hasLinuxDisplay(): boolean {
+  if (process.platform !== 'linux') {
+    return true;
+  }
+  const display = process.env.DISPLAY;
+  const wayland = process.env.WAYLAND_DISPLAY;
+  return Boolean((display && display.trim().length > 0) || (wayland && wayland.trim().length > 0));
+}
+
+async function finalizeManagedLaunch(
+  state: DaemonState,
+  launchOptions: LaunchOptions,
+  launchHashValue: string,
+  hasProxyAuth: boolean
+): Promise<void> {
+  state.browser = await BrowserManager.launch(launchOptions);
+  state.launchHash = launchHashValue;
+  state.isCdpConnection = false;
+  state.externalTargetKey = null;
+  state.launchHeadless = Boolean(launchOptions.headless);
+  state.launchProfile = launchOptions.profile || null;
+  state.subscribeToEvents();
+  bindRuntimeEventTrackers(state);
+  state.startFetchHandler();
+  state.startDialogHandler();
+
+  if (hasProxyAuth && state.browser) {
+    const sessionId = state.browser.activeSessionId();
+    await state.browser.client.sendCommand(
+      'Fetch.enable',
+      {
+        handleAuthRequests: true,
+        patterns: [{ urlPattern: '*', requestStage: 'Request' }],
+      },
+      sessionId
+    );
+  }
+}
+
 /**
  * Generate a hash of launch options to detect if relaunch is needed
  */
@@ -272,32 +311,14 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
 
   state.resetInputState();
 
+  const canFallbackToHeadless =
+    process.platform === 'linux' &&
+    !launchOptions.headless &&
+    !hasLinuxDisplay();
+
   // Launch the browser
   try {
-    state.browser = await BrowserManager.launch(launchOptions);
-    state.launchHash = newHash;
-    state.isCdpConnection = false;
-    state.externalTargetKey = null;
-    state.launchHeadless = Boolean(launchOptions.headless);
-    state.launchProfile = launchOptions.profile || null;
-    state.subscribeToEvents();
-    bindRuntimeEventTrackers(state);
-    state.startFetchHandler();
-    state.startDialogHandler();
-    // TODO: state.updateStreamClient();
-
-    // Enable Fetch interception for domain filtering and/or proxy auth
-    if (hasProxyAuth && state.browser) {
-      const sessionId = state.browser.activeSessionId();
-      await state.browser.client.sendCommand(
-        'Fetch.enable',
-        {
-          handleAuthRequests: true,
-          patterns: [{ urlPattern: '*', requestStage: 'Request' }],
-        },
-        sessionId
-      );
-    }
+    await finalizeManagedLaunch(state, launchOptions, newHash, hasProxyAuth);
 
     return {
       id,
@@ -305,10 +326,31 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
       data: { launched: true },
     };
   } catch (err: any) {
+    const primaryError = err?.message || 'Failed to launch browser';
+    if (canFallbackToHeadless) {
+      try {
+        const fallbackOptions: LaunchOptions = { ...launchOptions, headless: true };
+        await finalizeManagedLaunch(state, fallbackOptions, newHash, hasProxyAuth);
+        return {
+          id,
+          success: true,
+          warning:
+            'Headed launch failed on Linux without DISPLAY/WAYLAND. Automatically fell back to headless.',
+          data: { launched: true, fallbackHeadless: true },
+        };
+      } catch (fallbackErr: any) {
+        const fallbackError = fallbackErr?.message || 'Failed to launch browser in headless fallback';
+        return {
+          id,
+          success: false,
+          error: `${primaryError}; headless fallback also failed: ${fallbackError}`,
+        };
+      }
+    }
     return {
       id,
       success: false,
-      error: err.message || 'Failed to launch browser',
+      error: primaryError,
     };
   }
 }
@@ -376,7 +418,7 @@ export async function handleClose(cmd: any, state: DaemonState): Promise<any> {
 /**
  * Auto-launch helper - called by executor when browser is needed but not running
  */
-export async function autoLaunch(state: DaemonState): Promise<void> {
+export async function autoLaunch(state: DaemonState): Promise<{ warning?: string }> {
   // Use default launch command
   const launchCmd: any = {
     action: 'launch',
@@ -397,4 +439,5 @@ export async function autoLaunch(state: DaemonState): Promise<void> {
   if (!result.success) {
     throw new Error(`Auto-launch failed: ${result.error}`);
   }
+  return { warning: typeof result.warning === 'string' ? result.warning : undefined };
 }

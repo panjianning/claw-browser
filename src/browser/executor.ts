@@ -92,6 +92,7 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
   const action = cmd.action || '';
   const id = cmd.id || '';
   const isWaitAction = WAIT_ACTIONS.has(action);
+  let launchWarning: string | undefined;
 
   // Broadcast command to stream server
   if (state.streamServer) {
@@ -187,7 +188,8 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
       // Auto-launch
       const { autoLaunch } = await import('./lifecycle.js');
       try {
-        await autoLaunch(state);
+        const launchResult = await autoLaunch(state);
+        launchWarning = launchResult.warning;
       } catch (err: any) {
         return errorResponse(id, `Auto-launch failed: ${err.message || String(err)}`);
       }
@@ -238,6 +240,15 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
   // Route to handler
   try {
     const result = await routeAction(action, cmd, state);
+    if (
+      launchWarning &&
+      result &&
+      typeof result === 'object' &&
+      !Array.isArray(result) &&
+      !('warning' in result)
+    ) {
+      (result as any).warning = launchWarning;
+    }
     return result;
   } catch (error: any) {
     return errorResponse(id, error.message || String(error));

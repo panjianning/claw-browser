@@ -1051,6 +1051,9 @@ async function main() {
       printJsonValue(response);
     } else {
       if (response.success) {
+        if (typeof response.warning === 'string' && response.warning.trim().length > 0) {
+          console.log(`Warning: ${response.warning}`);
+        }
         printHumanSuccess(command, response);
       } else {
         console.error(`Error: ${response.error || 'Unknown error'}`);
