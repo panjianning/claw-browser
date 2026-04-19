@@ -482,7 +482,7 @@ async function collectCursorInteractiveElements(
       sessionId
     );
   } catch (e) {
-    console.error(`[agent-browser] Warning: failed to clean up data-__ab-ci attributes: ${e}`);
+    console.error(`[claw-browser] Warning: failed to clean up data-__ab-ci attributes: ${e}`);
   }
 
   // Build map

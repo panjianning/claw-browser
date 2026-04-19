@@ -64,7 +64,7 @@ interface SiteTabLease {
 }
 
 function getAgentBrowserDir(): string {
-  return path.join(os.homedir(), '.agent-browser');
+  return path.join(os.homedir(), '.claw-browser');
 }
 
 function getLocalSitesDir(): string {
@@ -320,6 +320,11 @@ function sleep(ms: number): Promise<void> {
 }
 
 function getMaxTabsPerDomain(): number {
+  const raw = process.env.CLAW_BROWSER_SITE_MAX_TABS_PER_DOMAIN;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
   return DEFAULT_SITE_DOMAIN_MAX_TABS;
 }
 

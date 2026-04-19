@@ -244,7 +244,7 @@ async function collectStorageViaTempTarget(
  */
 export function getSessionsDir(): string {
   const homeDir = os.homedir();
-  return path.join(homeDir, '.agent-browser', 'sessions');
+  return path.join(homeDir, '.claw-browser', 'sessions');
 }
 
 /**
@@ -347,7 +347,7 @@ export async function saveState(
   }
 
   // Check for encryption
-  const encryptionKey = process.env.AGENT_BROWSER_ENCRYPTION_KEY;
+  const encryptionKey = process.env.CLAW_BROWSER_ENCRYPTION_KEY;
   if (encryptionKey) {
     const key = deriveKey(encryptionKey);
     const encrypted = encrypt(Buffer.from(jsonStr, 'utf-8'), key);
@@ -372,10 +372,10 @@ export async function loadState(
 
   if (filePath.endsWith('.enc')) {
     // Encrypted file
-    const encryptionKey = process.env.AGENT_BROWSER_ENCRYPTION_KEY;
+    const encryptionKey = process.env.CLAW_BROWSER_ENCRYPTION_KEY;
     if (!encryptionKey) {
       throw new Error(
-        'Encrypted state file requires AGENT_BROWSER_ENCRYPTION_KEY'
+        'Encrypted state file requires CLAW_BROWSER_ENCRYPTION_KEY'
       );
     }
 
@@ -389,7 +389,7 @@ export async function loadState(
       jsonStr = await fs.readFile(filePath, 'utf-8');
     } catch (error) {
       // Try .enc version if encryption key is available
-      const encryptionKey = process.env.AGENT_BROWSER_ENCRYPTION_KEY;
+      const encryptionKey = process.env.CLAW_BROWSER_ENCRYPTION_KEY;
       if (encryptionKey) {
         const encPath = `${filePath}.enc`;
         try {
@@ -540,10 +540,10 @@ export async function stateShow(filePath: string): Promise<any> {
 
   let jsonStr: string;
   if (encrypted) {
-    const encryptionKey = process.env.AGENT_BROWSER_ENCRYPTION_KEY;
+    const encryptionKey = process.env.CLAW_BROWSER_ENCRYPTION_KEY;
     if (!encryptionKey) {
       throw new Error(
-        'Encrypted state file requires AGENT_BROWSER_ENCRYPTION_KEY'
+        'Encrypted state file requires CLAW_BROWSER_ENCRYPTION_KEY'
       );
     }
 

@@ -152,7 +152,7 @@ export async function handleScreenshot(cmd: any, state: DaemonState): Promise<an
       // Generate default path
       const timestamp = Date.now();
       const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
-      savePath = `${homeDir}/.agent-browser/tmp/screenshots/screenshot-${timestamp}.png`;
+      savePath = `${homeDir}/.claw-browser/tmp/screenshots/screenshot-${timestamp}.png`;
     }
 
     // Ensure directory exists

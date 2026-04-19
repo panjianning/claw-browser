@@ -121,7 +121,7 @@ export class CdpClient extends EventEmitter {
       this.closed = true;
       this.stopKeepalive();
 
-      if (process.env.AGENT_BROWSER_DEBUG) {
+      if (process.env.CLAW_BROWSER_DEBUG) {
         console.error(`[cdp] WebSocket Close: code=${code}, reason=${reason.toString()}`);
       }
 
@@ -133,7 +133,7 @@ export class CdpClient extends EventEmitter {
     });
 
     this.ws.on('error', (err) => {
-      if (process.env.AGENT_BROWSER_DEBUG) {
+      if (process.env.CLAW_BROWSER_DEBUG) {
         console.error(`[cdp] WebSocket Error: ${err.message}`);
       }
     });
@@ -153,7 +153,7 @@ export class CdpClient extends EventEmitter {
       try {
         this.ws.ping();
       } catch (err) {
-        if (process.env.AGENT_BROWSER_DEBUG) {
+        if (process.env.CLAW_BROWSER_DEBUG) {
           console.error(`[cdp] Keepalive ping failed: ${err}`);
         }
         this.stopKeepalive();
@@ -300,7 +300,7 @@ export class CdpClient extends EventEmitter {
       try {
         listener(msg);
       } catch (err) {
-        if (process.env.AGENT_BROWSER_DEBUG) {
+        if (process.env.CLAW_BROWSER_DEBUG) {
           console.error(`[cdp] Raw listener error: ${err}`);
         }
       }

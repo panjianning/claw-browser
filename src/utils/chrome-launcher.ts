@@ -86,7 +86,7 @@ function buildChromeArgs(options: LaunchOptions): ChromeArgs {
     userDataDir = options.profile.replace(/^~/, process.env.HOME || process.env.USERPROFILE || '');
   } else {
     // Create temp profile
-    userDataDir = path.join(tmpdir(), `agent-browser-chrome-${randomUUID()}`);
+    userDataDir = path.join(tmpdir(), `claw-browser-chrome-${randomUUID()}`);
     mkdirSync(userDataDir, { recursive: true });
     tempUserDataDir = userDataDir;
   }

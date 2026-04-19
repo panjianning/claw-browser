@@ -18,7 +18,7 @@ export interface DaemonOptions {
 
 function getSocketDir(): string {
   const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
-  return path.join(homeDir, '.agent-browser');
+  return path.join(homeDir, '.claw-browser');
 }
 
 function getPortForSession(session: string): number {
@@ -209,7 +209,7 @@ async function startTcpServer(
 
     // Try preferred port first
     server.listen(preferredPort, '127.0.0.1', () => {
-      if (process.env.AGENT_BROWSER_DEBUG) {
+      if (process.env.CLAW_BROWSER_DEBUG) {
         console.error(`[daemon] TCP server listening on 127.0.0.1:${preferredPort}`);
       }
       resolve(server);
@@ -217,13 +217,13 @@ async function startTcpServer(
 
     server.on('error', (err: any) => {
       if (err.code === 'EADDRINUSE') {
-        if (process.env.AGENT_BROWSER_DEBUG) {
+        if (process.env.CLAW_BROWSER_DEBUG) {
           console.error(`[daemon] Port ${preferredPort} in use, trying ephemeral port`);
         }
         // Port in use, try ephemeral port
         server.listen(0, '127.0.0.1', () => {
           const actualPort = (server.address() as net.AddressInfo)?.port;
-          if (process.env.AGENT_BROWSER_DEBUG) {
+          if (process.env.CLAW_BROWSER_DEBUG) {
             console.error(`[daemon] TCP server listening on 127.0.0.1:${actualPort}`);
           }
           resolve(server);

@@ -71,7 +71,7 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     }
   }
 
-  // Check AGENT_BROWSER_CONFIRM_ACTIONS
+  // Check CLAW_BROWSER_CONFIRM_ACTIONS
   if (action !== 'confirm' && action !== 'deny') {
     if (state.confirmActions && state.confirmActions.requiresConfirmation(action)) {
       state.pendingConfirmation = {
@@ -576,9 +576,9 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     case 'responsebody':
       return advanced.handleResponseBody(cmd, state);
     case 'install':
-      return errorResponse(id, 'install command is managed by the Rust agent-browser binary and is not implemented in claw-browser yet');
+      return errorResponse(id, 'install command is managed by the Rust claw-browser binary and is not implemented in claw-browser yet');
     case 'upgrade':
-      return errorResponse(id, 'upgrade command is managed by the Rust agent-browser binary and is not implemented in claw-browser yet');
+      return errorResponse(id, 'upgrade command is managed by the Rust claw-browser binary and is not implemented in claw-browser yet');
     case 'chat':
       return errorResponse(id, 'chat command is not implemented in claw-browser yet');
     // Confirmation

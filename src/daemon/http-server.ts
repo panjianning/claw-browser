@@ -332,7 +332,7 @@ async function readBody(req: http.IncomingMessage, maxSize: number): Promise<str
 async function discoverSessions(): Promise<any[]> {
   const sessions: any[] = [];
   const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
-  const socketDir = path.join(homeDir, '.agent-browser');
+  const socketDir = path.join(homeDir, '.claw-browser');
 
   try {
     const files = await fs.readdir(socketDir);

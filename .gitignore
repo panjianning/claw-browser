@@ -5,10 +5,10 @@ node_modules/
 dist/
 
 # Native binaries (keep the launcher scripts)
-bin/agent-browser-*
+bin/claw-browser-*
 bin/.install-method
-!bin/agent-browser
-!bin/agent-browser.cmd
+!bin/claw-browser
+!bin/claw-browser.cmd
 
 # Rust build artifacts
 cli/target/

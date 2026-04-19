@@ -46,13 +46,13 @@ function parseLaunchOptions(cmd: any): LaunchOptions {
       : []
     : undefined;
 
-  // Check AGENT_BROWSER_HEADED env var for headed mode
-  const headedFromEnv = process.env.AGENT_BROWSER_HEADED === '1';
+  // Check CLAW_BROWSER_HEADED env var for headed mode
+  const headedFromEnv = process.env.CLAW_BROWSER_HEADED === '1';
   
   return {
     headless: cmd.headless !== undefined ? Boolean(cmd.headless) : !headedFromEnv,
     executablePath:
-      cmd.executablePath || process.env.AGENT_BROWSER_EXECUTABLE_PATH || undefined,
+      cmd.executablePath || process.env.CLAW_BROWSER_EXECUTABLE_PATH || undefined,
     proxy: cmd.proxy
       ? typeof cmd.proxy === 'string'
         ? cmd.proxy
@@ -61,11 +61,11 @@ function parseLaunchOptions(cmd: any): LaunchOptions {
     proxyBypass: cmd.proxy?.bypass || undefined,
     proxyUsername:
       cmd.proxy?.username ||
-      process.env.AGENT_BROWSER_PROXY_USERNAME ||
+      process.env.CLAW_BROWSER_PROXY_USERNAME ||
       undefined,
     proxyPassword:
       cmd.proxy?.password ||
-      process.env.AGENT_BROWSER_PROXY_PASSWORD ||
+      process.env.CLAW_BROWSER_PROXY_PASSWORD ||
       undefined,
     profile: cmd.profile || undefined,
     allowFileAccess: cmd.allowFileAccess || false,
@@ -98,7 +98,7 @@ function parseCdpTarget(raw: string): { cdpPort?: number; cdpUrl?: string } {
 
 export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
-  const envCdp = process.env.AGENT_BROWSER_CDP?.trim();
+  const envCdp = process.env.CLAW_BROWSER_CDP?.trim();
   const parsedEnvCdp = envCdp ? parseCdpTarget(envCdp) : {};
   const cdpUrl = cmd.cdpUrl || parsedEnvCdp.cdpUrl;
   const cdpPort = cmd.cdpPort || parsedEnvCdp.cdpPort;
@@ -199,7 +199,7 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     };
   }
 
-  const engine = cmd.engine || process.env.AGENT_BROWSER_ENGINE || 'chrome';
+  const engine = cmd.engine || process.env.CLAW_BROWSER_ENGINE || 'chrome';
 
   // Store proxy credentials for Fetch.authRequired handling
   const hasProxyAuth = Boolean(launchOptions.proxyUsername);
@@ -331,7 +331,7 @@ export async function autoLaunch(state: DaemonState): Promise<void> {
     id: 'auto-launch',
   };
 
-  const envCdp = process.env.AGENT_BROWSER_CDP?.trim();
+  const envCdp = process.env.CLAW_BROWSER_CDP?.trim();
   if (envCdp) {
     const parsed = parseCdpTarget(envCdp);
     if (parsed.cdpPort) {

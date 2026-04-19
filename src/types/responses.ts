@@ -1,4 +1,4 @@
-// Response types for agent-browser commands
+// Response types for claw-browser commands
 export interface BaseResponse {
   id: string;
   success: boolean;

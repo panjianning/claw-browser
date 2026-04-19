@@ -333,7 +333,7 @@ function parseCdpTarget(value: string): CdpTarget {
 function getDefaultSession(flags: Flags): string {
   const fromFlag = typeof flags.session === 'string' ? flags.session.trim() : '';
   if (fromFlag.length > 0) return fromFlag;
-  const fromEnv = (process.env.AGENT_BROWSER_SESSION || '').trim();
+  const fromEnv = (process.env.CLAW_BROWSER_SESSION || '').trim();
   if (fromEnv.length > 0) return fromEnv;
   return 'default';
 }
@@ -458,18 +458,18 @@ async function main() {
   const args = process.argv.slice(2);
 
   // Check if we're running in daemon mode
-  if (process.env.AGENT_BROWSER_DAEMON === '1') {
+  if (process.env.CLAW_BROWSER_DAEMON === '1') {
     console.error('[index] Daemon mode detected, starting daemon...');
     // Import and run daemon
     const { runDaemon } = await import('./daemon/index.js');
-    const session = process.env.AGENT_BROWSER_SESSION || 'default';
+    const session = process.env.CLAW_BROWSER_SESSION || 'default';
     console.error(`[index] Calling runDaemon for session: ${session}`);
     await runDaemon({
       session,
-      idleTimeoutMs: process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS
-        ? parseInt(process.env.AGENT_BROWSER_IDLE_TIMEOUT_MS)
+      idleTimeoutMs: process.env.CLAW_BROWSER_IDLE_TIMEOUT_MS
+        ? parseInt(process.env.CLAW_BROWSER_IDLE_TIMEOUT_MS)
         : undefined,
-      debug: process.env.AGENT_BROWSER_DEBUG === '1',
+      debug: process.env.CLAW_BROWSER_DEBUG === '1',
     });
     console.error('[index] runDaemon returned');
     return;
@@ -480,7 +480,7 @@ async function main() {
   const defaultSession = getDefaultSession(flags);
 
   // JSON output mode
-  const jsonMode = flags.json || process.env.AGENT_BROWSER_JSON === '1';
+  const jsonMode = flags.json || process.env.CLAW_BROWSER_JSON === '1';
 
   // Handle built-in commands
   if (cleanedArgs.length === 0 || cleanedArgs[0] === 'help' || cleanedArgs[0] === '--help' || cleanedArgs[0] === '-h') {
@@ -516,13 +516,13 @@ async function main() {
     try {
       const opts: connection.DaemonOptions = {
         headed: flags.headed || false,
-        debug: process.env.AGENT_BROWSER_DEBUG === '1',
+        debug: process.env.CLAW_BROWSER_DEBUG === '1',
         profile: flags.profile,
       };
 
       // Parse proxy if provided
-      if (flags.provider === 'proxy' && process.env.AGENT_BROWSER_PROXY) {
-        const parsed = parseProxy(process.env.AGENT_BROWSER_PROXY);
+      if (flags.provider === 'proxy' && process.env.CLAW_BROWSER_PROXY) {
+        const parsed = parseProxy(process.env.CLAW_BROWSER_PROXY);
         opts.proxy = parsed.server;
         opts.proxyUsername = parsed.username;
         opts.proxyPassword = parsed.password;
@@ -618,7 +618,7 @@ async function main() {
       const cdpTarget = parseCdpTarget(cdpArg);
       const opts: connection.DaemonOptions = {
         headed: flags.headed || false,
-        debug: process.env.AGENT_BROWSER_DEBUG === '1',
+        debug: process.env.CLAW_BROWSER_DEBUG === '1',
         cdp: cdpArg,
         profile: flags.profile,
       };
@@ -945,7 +945,7 @@ EXAMPLES:
   claw-browser site list
   claw-browser site xhs/note --note_id 123
   claw-browser tab list
-  claw-browser tab new --label docs https://agent-browser.dev
+  claw-browser tab new --label docs https://claw-browser.dev
   claw-browser tab t2
   claw-browser tab close docs
   claw-browser window new
@@ -960,7 +960,7 @@ EXAMPLES:
   claw-browser my-session snapshot
   claw-browser stop my-session
 
-For more information, visit: https://agent-browser.dev
+For more information, visit: https://claw-browser.dev
 `);
 }
 

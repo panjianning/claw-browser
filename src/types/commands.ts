@@ -1,4 +1,4 @@
-// Command types for agent-browser CLI
+// Command types for claw-browser CLI
 export interface Command {
   id: string;
   action: string;

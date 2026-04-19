@@ -233,23 +233,23 @@ export class DaemonState extends EventEmitter {
     super();
 
     // Load from environment variables
-    const allowedDomains = process.env.AGENT_BROWSER_ALLOWED_DOMAINS;
+    const allowedDomains = process.env.CLAW_BROWSER_ALLOWED_DOMAINS;
     if (allowedDomains && allowedDomains.trim()) {
       this.domainFilter = new DomainFilter(allowedDomains.split(',').map((s) => s.trim()));
     }
 
     this.eventTracker = new EventTracker();
-    this.sessionName = process.env.AGENT_BROWSER_SESSION_NAME || null;
-    this.sessionId = process.env.AGENT_BROWSER_SESSION || 'default';
+    this.sessionName = process.env.CLAW_BROWSER_SESSION_NAME || null;
+    this.sessionId = process.env.CLAW_BROWSER_SESSION || 'default';
 
     // Auto-dialog disabled if env var is set
-    const noAutoDialog = process.env.AGENT_BROWSER_NO_AUTO_DIALOG;
+    const noAutoDialog = process.env.CLAW_BROWSER_NO_AUTO_DIALOG;
     this.autoDialog = !(noAutoDialog === '1' || noAutoDialog === 'true' || noAutoDialog === 'yes');
 
-    this.engine = process.env.AGENT_BROWSER_ENGINE || 'chrome';
+    this.engine = process.env.CLAW_BROWSER_ENGINE || 'chrome';
 
     // Parse default timeout
-    const timeoutStr = process.env.AGENT_BROWSER_DEFAULT_TIMEOUT;
+    const timeoutStr = process.env.CLAW_BROWSER_DEFAULT_TIMEOUT;
     this.defaultTimeoutMs = timeoutStr ? parseInt(timeoutStr, 10) || 30000 : 30000;
 
     // Initialize refMap (placeholder for now, will be implemented in element.ts)
