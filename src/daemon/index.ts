@@ -318,6 +318,13 @@ function createSerializedExecutor(
   let tail: Promise<void> = Promise.resolve();
 
   return async (cmd: any): Promise<any> => {
+    const action = typeof cmd?.action === 'string' ? cmd.action : '';
+    if (NON_BLOCKING_ACTIONS.has(action)) {
+      // Allow wait-family commands to run concurrently so they don't block the
+      // entire session command queue.
+      return executeCommand(cmd, state);
+    }
+
     const previous = tail;
     let release!: () => void;
 
@@ -333,3 +340,11 @@ function createSerializedExecutor(
     }
   };
 }
+
+const NON_BLOCKING_ACTIONS = new Set([
+  'wait',
+  'waitforurl',
+  'waitforloadstate',
+  'waitforfunction',
+  'waitfordownload',
+]);

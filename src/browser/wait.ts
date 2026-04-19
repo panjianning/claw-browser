@@ -12,7 +12,7 @@ export async function handleWait(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = getWaitSessionId(cmd, mgr);
   const timeoutMs = state.timeoutMs(cmd);
 
   // Wait for text
@@ -52,8 +52,8 @@ export async function handleWait(cmd: any, state: DaemonState): Promise<any> {
 
   // Wait for load state
   if (cmd.loadState && typeof cmd.loadState === 'string') {
-    const waitUntil = cmd.loadState === 'commit' ? 'commit' : 'load';
-    await mgr.waitForLifecycle?.(waitUntil, sessionId);
+    const waitUntil = normalizeWaitUntil(cmd.loadState);
+    await waitForLifecycleWithTimeout(mgr, sessionId, waitUntil, timeoutMs);
     return {
       id,
       success: true,
@@ -81,7 +81,7 @@ export async function handleWaitForUrl(
     return { id, success: false, error: "Missing 'url' parameter" };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = getWaitSessionId(cmd, mgr);
   const timeoutMs = state.timeoutMs(cmd);
 
   await waitForUrl(mgr.client, sessionId, urlPattern, timeoutMs);
@@ -99,15 +99,11 @@ export async function handleWaitForLoadState(
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const loadState = cmd.state || 'load';
-  const sessionId = mgr.activeSessionId?.() || '';
+  const loadState = normalizeWaitUntil(cmd.state || 'load');
+  const sessionId = getWaitSessionId(cmd, mgr);
   const timeoutMs = state.timeoutMs(cmd);
-
-  const eventName = loadState === 'domcontentloaded'
-    ? 'Page.domContentEventFired'
-    : 'Page.loadEventFired';
   try {
-    await waitForEvent(mgr.client, sessionId, eventName, timeoutMs);
+    await waitForLifecycleWithTimeout(mgr, sessionId, loadState, timeoutMs);
   } catch (error: any) {
     return { id, success: false, error: error.message || String(error) };
   }
@@ -130,7 +126,7 @@ export async function handleWaitForFunction(
     return { id, success: false, error: "Missing 'expression' parameter" };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = getWaitSessionId(cmd, mgr);
   const timeoutMs = state.timeoutMs(cmd);
 
   await waitForFunction(mgr.client, sessionId, expression, timeoutMs);
@@ -163,7 +159,7 @@ export async function handleWaitForDownload(
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = getWaitSessionId(cmd, mgr);
   const timeoutMs = state.timeoutMs(cmd);
   const deadline = Date.now() + timeoutMs;
 
@@ -335,4 +331,62 @@ async function waitForEvent(
 
     client.on(eventName, handler);
   });
+}
+
+function getWaitSessionId(cmd: any, mgr: any): string {
+  if (cmd && typeof cmd.sessionId === 'string' && cmd.sessionId.length > 0) {
+    return cmd.sessionId;
+  }
+  return mgr.activeSessionId?.() || '';
+}
+
+function normalizeWaitUntil(raw: string): string {
+  const value = String(raw || 'load').trim().toLowerCase();
+  if (value === 'domcontentloaded') return 'domcontentloaded';
+  if (value === 'networkidle') return 'networkidle';
+  if (value === 'none') return 'none';
+  // commit is not implemented as a separate lifecycle signal in this backend.
+  if (value === 'commit') return 'load';
+  return 'load';
+}
+
+async function waitForLifecycleWithTimeout(
+  mgr: any,
+  sessionId: string,
+  waitUntil: string,
+  timeoutMs: number
+): Promise<void> {
+  const previousTimeout =
+    typeof mgr.getDefaultTimeoutMs === 'function' ? mgr.getDefaultTimeoutMs() : undefined;
+  const canSetDefaultTimeout = typeof mgr.setDefaultTimeout === 'function';
+
+  if (canSetDefaultTimeout) {
+    mgr.setDefaultTimeout(timeoutMs);
+  }
+
+  try {
+    if (typeof mgr.waitForLifecycle === 'function') {
+      await mgr.waitForLifecycle(waitUntil, sessionId);
+      return;
+    }
+
+    if (waitUntil === 'networkidle') {
+      throw new Error('networkidle wait is not supported by this browser manager');
+    }
+
+    const eventName =
+      waitUntil === 'domcontentloaded'
+        ? 'Page.domContentEventFired'
+        : 'Page.loadEventFired';
+    await waitForEvent(mgr.client, sessionId, eventName, timeoutMs);
+  } finally {
+    if (
+      canSetDefaultTimeout &&
+      typeof previousTimeout === 'number' &&
+      Number.isFinite(previousTimeout) &&
+      previousTimeout > 0
+    ) {
+      mgr.setDefaultTimeout(previousTimeout);
+    }
+  }
 }

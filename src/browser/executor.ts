@@ -37,6 +37,7 @@ export function errorResponse(id: string, error: string): any {
 export async function executeCommand(cmd: any, state: DaemonState): Promise<any> {
   const action = cmd.action || '';
   const id = cmd.id || '';
+  const isWaitAction = WAIT_ACTIONS.has(action);
 
   // Broadcast command to stream server
   if (state.streamServer) {
@@ -145,7 +146,16 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
 
   if (cmd.tabId && state.browser && action !== 'tab_switch' && action !== 'tab_list' && action !== 'tab_new') {
     try {
-      state.browser.setActivePageByTargetId?.(cmd.tabId);
+      if (isWaitAction) {
+        const pages = state.browser.getPages?.() || [];
+        const page = pages.find((p: any) => p?.targetId === cmd.tabId);
+        if (!page?.sessionId) {
+          return errorResponse(id, `Tab not found: ${cmd.tabId}`);
+        }
+        cmd.sessionId = page.sessionId;
+      } else {
+        state.browser.setActivePageByTargetId?.(cmd.tabId);
+      }
     } catch (error: any) {
       return errorResponse(id, error?.message || `Tab not found: ${cmd.tabId}`);
     }
@@ -591,3 +601,11 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
       return errorResponse(id, `Unknown action: ${action}`);
   }
 }
+
+const WAIT_ACTIONS = new Set([
+  'wait',
+  'waitforurl',
+  'waitforloadstate',
+  'waitforfunction',
+  'waitfordownload',
+]);
