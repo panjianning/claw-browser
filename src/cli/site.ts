@@ -6,7 +6,7 @@ import { spawnSync } from 'child_process';
 import { genId } from './commands.js';
 import * as connection from '../connection/index.js';
 
-const COMMUNITY_REPO = 'https://github.com/epiral/agent-sites.git';
+const COMMUNITY_REPO = 'https://github.com/panjianning/claw-sites.git';
 const DEFAULT_SITE_DOMAIN_MAX_TABS = 2;
 const SITE_POOL_LOCK_TIMEOUT_MS = 60_000;
 const SITE_POOL_RETRY_MS = 120;
@@ -73,7 +73,7 @@ function getLocalSitesDir(): string {
 }
 
 function getCommunitySitesDir(): string {
-  return path.join(getAgentBrowserDir(), 'agent-sites');
+  return path.join(getAgentBrowserDir(), 'claw-sites');
 }
 
 function getSitePoolDir(): string {
@@ -262,7 +262,7 @@ function printSiteHelp(jsonMode: boolean): void {
     '  claw-browser site [list]',
     '  claw-browser site search <query>',
     '  claw-browser site info <name>',
-    '  claw-browser site update',
+    '  claw-browser site update [--pull|--clone]',
     '  claw-browser site <adapter-name> [args...]',
     '  claw-browser site run <adapter-name> [args...]',
     '',
@@ -279,7 +279,7 @@ function printSiteHelp(jsonMode: boolean): void {
         'claw-browser site [list]',
         'claw-browser site search <query>',
         'claw-browser site info <name>',
-        'claw-browser site update',
+        'claw-browser site update [--pull|--clone]',
         'claw-browser site <adapter-name> [args...]',
         'claw-browser site run <adapter-name> [args...]',
       ],
@@ -288,6 +288,26 @@ function printSiteHelp(jsonMode: boolean): void {
   }
 
   console.log(helpText);
+}
+
+function printSiteUpdateHelp(jsonMode: boolean): void {
+  if (jsonMode) {
+    printValue(true, {
+      success: true,
+      usage: 'claw-browser site update [--pull|--clone]',
+      options: [
+        { name: '--pull', description: 'Force git pull mode; requires existing community repo clone.' },
+        { name: '--clone', description: 'Force git clone mode; requires community repo to not exist.' },
+      ],
+    });
+    return;
+  }
+
+  console.log('Usage: claw-browser site update [--pull|--clone]');
+  console.log('');
+  console.log('Options:');
+  console.log('  --pull   Force git pull mode (requires existing community repo clone)');
+  console.log('  --clone  Force git clone mode (requires community repo not cloned yet)');
 }
 
 function formatArgDefault(value: unknown): string {
@@ -778,14 +798,36 @@ async function runSiteAdapter(
   }
 }
 
-function runSiteUpdate(jsonMode: boolean): void {
+function runSiteUpdate(args: string[], jsonMode: boolean): void {
+  if (args.some((arg) => isHelpFlag(arg))) {
+    printSiteUpdateHelp(jsonMode);
+    return;
+  }
+
+  const forcePull = args.includes('--pull');
+  const forceClone = args.includes('--clone');
+  const unknownArgs = args.filter((arg) => arg !== '--pull' && arg !== '--clone');
+  if (unknownArgs.length > 0) {
+    throw new Error(`site update: unknown option(s): ${unknownArgs.join(', ')}`);
+  }
+  if (forcePull && forceClone) {
+    throw new Error('site update: --pull and --clone cannot be used together');
+  }
+
   const agentBrowserDir = getAgentBrowserDir();
   const communityDir = getCommunitySitesDir();
 
   fs.mkdirSync(agentBrowserDir, { recursive: true });
 
   const hasGit = fs.existsSync(path.join(communityDir, '.git'));
-  const updateMode = hasGit ? 'pull' : 'clone';
+  const updateMode = forcePull ? 'pull' : forceClone ? 'clone' : hasGit ? 'pull' : 'clone';
+
+  if (forcePull && !hasGit) {
+    throw new Error(`site update: cannot --pull because repo does not exist at ${communityDir}`);
+  }
+  if (forceClone && hasGit) {
+    throw new Error(`site update: cannot --clone because repo already exists at ${communityDir}`);
+  }
 
   if (updateMode === 'pull') {
     const res = spawnSync('git', ['pull', '--ff-only'], {
@@ -891,16 +933,44 @@ export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<
       throw new Error('Usage: claw-browser site info <name>');
     }
     const site = sites.find((s) => s.name === name);
-    if (!site) {
-      throw new Error(`site info: adapter "${name}" not found`);
+    if (site) {
+      printSiteInfo(site, opts.jsonMode);
+      return;
     }
 
-    printSiteInfo(site, opts.jsonMode);
-    return;
+    const normalized = name.endsWith('/') ? name.slice(0, -1) : name;
+    const group = sites.filter((s) => s.name.startsWith(`${normalized}/`));
+    if (group.length > 0) {
+      if (opts.jsonMode) {
+        printValue(true, {
+          platform: normalized,
+          adapters: group.map((s) => ({
+            name: s.name,
+            description: s.description,
+            domain: s.domain,
+            source: s.source,
+          })),
+        });
+        return;
+      }
+
+      console.log(`Adapters under "${normalized}/":`);
+      for (const s of group) {
+        const suffix = s.source === 'local' ? ' (local)' : '';
+        const desc = s.description ? ` - ${s.description}` : '';
+        console.log(`  ${s.name}${desc}${suffix}`);
+      }
+      console.log('');
+      console.log('Tip: use full adapter name for argument details, e.g.:');
+      console.log(`  claw-browser site info ${group[0].name}`);
+      return;
+    }
+
+    throw new Error(`site info: adapter "${name}" not found`);
   }
 
   if (sub === 'update') {
-    runSiteUpdate(opts.jsonMode);
+    runSiteUpdate(rest, opts.jsonMode);
     return;
   }
 
