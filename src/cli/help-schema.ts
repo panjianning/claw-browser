@@ -33,6 +33,7 @@ export const GLOBAL_FLAG_DEFS: GlobalFlagDef[] = [
   { names: ['--headers'], field: 'headers', kind: 'string', description: 'Default headers for navigation (JSON).' },
   { names: ['--default-timeout'], field: 'defaultTimeout', kind: 'number', description: 'Default timeout for wait-family commands (ms).' },
   { names: ['--headed'], field: 'headed', kind: 'boolean', description: 'Launch in headed mode.' },
+  { names: ['--headless'], field: 'headless', kind: 'boolean', description: 'Launch in headless mode (overrides --headed).' },
   { names: ['--annotate'], field: 'cliAnnotate', kind: 'boolean', description: 'Enable screenshot annotation mode.' },
   { names: ['--json', '-j'], field: 'json', kind: 'boolean', description: 'Emit JSON output.' },
 ];

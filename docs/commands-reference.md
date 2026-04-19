@@ -22,7 +22,8 @@ claw-browser --session <name> <command> [args...]
 - `--tab-id <tab-id>` / `--tabid <tab-id>`: route command to a specific tab
 - `--profile <path-or-name>`: browser profile
 - `--cdp <port|url>`: connect daemon commands to CDP target
-- `--headed`: launch headed mode
+- `--headed`: launch headed mode (default)
+- `--headless`: launch headless mode (overrides `--headed`)
 - `--json` or `-j`: JSON output
 - `--default-timeout <ms>`: default timeout for wait-family commands
 - `--annotate`: screenshot annotation mode

@@ -593,6 +593,16 @@ function parseFlags(args: string[]): { flags: Flags; cleanedArgs: string[] } {
   return { flags, cleanedArgs };
 }
 
+function resolveDaemonHeaded(flags: Flags): boolean {
+  if (flags.headless) {
+    return false;
+  }
+  if (flags.headed) {
+    return true;
+  }
+  return true;
+}
+
 const HELP_FLAGS = new Set(['--help', '-h']);
 
 function stripHelpFlags(args: string[]): string[] {
@@ -736,7 +746,7 @@ async function main() {
     try {
       const cdpTarget = parseCdpTarget(cdpArg);
       const opts: connection.DaemonOptions = {
-        headed: flags.headed || false,
+        headed: resolveDaemonHeaded(flags),
         debug: process.env.CLAW_BROWSER_DEBUG === '1',
         cdp: cdpArg,
         profile: flags.profile,
@@ -862,7 +872,7 @@ async function main() {
 
       try {
         const opts: connection.DaemonOptions = {
-          headed: flags.headed || false,
+          headed: resolveDaemonHeaded(flags),
           debug: process.env.CLAW_BROWSER_DEBUG === '1',
           profile: flags.profile,
         };
@@ -1008,7 +1018,7 @@ async function main() {
         jsonMode,
         version: VERSION,
         daemonOptions: {
-          headed: flags.headed || false,
+          headed: resolveDaemonHeaded(flags),
           debug: false,
           cdp: flags.cdp,
           profile: flags.profile,
@@ -1022,12 +1032,17 @@ async function main() {
 
     // Ensure daemon is running
     const opts: connection.DaemonOptions = {
-      headed: flags.headed || false,
+      headed: resolveDaemonHeaded(flags),
       debug: false,
       cdp: flags.cdp,
       profile: flags.profile,
     };
-    await connection.ensureDaemon(session, opts, VERSION);
+    const daemonResult = await connection.ensureDaemon(session, opts, VERSION);
+    if (!jsonMode && !daemonResult.alreadyRunning) {
+      const mode = opts.headed ? 'headed' : 'headless';
+      console.log(`Session '${session}': daemon started (${mode}).`);
+      console.log(`Session '${session}': command channel connected.`);
+    }
 
     // Send command
     const response = await connection.sendCommand(command, session);

@@ -247,6 +247,7 @@ export interface Flags {
   defaultTimeout?: number;
   cliAnnotate?: boolean;
   headed?: boolean;
+  headless?: boolean;
   cdp?: string;
   tabId?: string;
   json?: boolean;
