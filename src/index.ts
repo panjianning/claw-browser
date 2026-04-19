@@ -56,6 +56,150 @@ function printJsonErrorWithType(message: string, errorType: string): void {
   });
 }
 
+interface SessionStatusSummary {
+  session: string;
+  reachable: boolean;
+  mode: string;
+  backendType?: string;
+  engine?: string;
+  headed: boolean | null;
+  cdpConnected: boolean;
+  externalTarget: string | null;
+  cdpUrl: string | null;
+  profile: string | null;
+  daemonPid: number | null;
+  startedAt: string | null;
+  uptimeMs: number | null;
+  socketDir: string;
+  transport: 'tcp' | 'unix';
+  socketPath: string | null;
+  port: number | null;
+  pidPath: string;
+  versionPath: string;
+  daemonVersion: string | null;
+  pidFromFile: number | null;
+  error?: string;
+}
+
+function shortCdpEndpoint(url: string | null): string | null {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    return `${u.hostname}:${u.port || (u.protocol === 'wss:' ? '443' : '80')}`;
+  } catch {
+    return url;
+  }
+}
+
+function parseSessionStatusData(session: string, data: any): SessionStatusSummary {
+  const meta = connection.getSessionMetadata(session);
+  const mode = typeof data?.mode === 'string' ? data.mode : 'unknown';
+  const backendType = typeof data?.backendType === 'string' ? data.backendType : undefined;
+  const engine = typeof data?.engine === 'string' ? data.engine : undefined;
+  const headed = typeof data?.headed === 'boolean' ? data.headed : null;
+  const cdpConnected = data?.cdpConnected === true;
+  const externalTarget =
+    typeof data?.externalTarget === 'string' && data.externalTarget.trim().length > 0
+      ? data.externalTarget.trim()
+      : null;
+  const cdpUrl =
+    typeof data?.cdpUrl === 'string' && data.cdpUrl.trim().length > 0
+      ? data.cdpUrl.trim()
+      : null;
+  const profile =
+    typeof data?.profile === 'string' && data.profile.trim().length > 0
+      ? data.profile.trim()
+      : null;
+  const daemonPid = typeof data?.daemonPid === 'number' ? data.daemonPid : null;
+  const startedAt =
+    typeof data?.startedAt === 'string' && data.startedAt.trim().length > 0
+      ? data.startedAt.trim()
+      : null;
+  const uptimeMs = typeof data?.uptimeMs === 'number' ? data.uptimeMs : null;
+
+  return {
+    session,
+    reachable: true,
+    mode,
+    backendType,
+    engine,
+    headed,
+    cdpConnected,
+    externalTarget,
+    cdpUrl,
+    profile,
+    daemonPid,
+    startedAt,
+    uptimeMs,
+    socketDir: meta.socketDir,
+    transport: meta.transport,
+    socketPath: meta.socketPath,
+    port: meta.port,
+    pidPath: meta.pidPath,
+    versionPath: meta.versionPath,
+    daemonVersion: meta.version,
+    pidFromFile: meta.pid,
+  };
+}
+
+async function collectSessionStatus(session: string): Promise<SessionStatusSummary> {
+  const meta = connection.getSessionMetadata(session);
+  try {
+    const res = await connection.sendCommand(
+      { id: `session-status-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`, action: 'session_status' },
+      session
+    );
+    if (!res.success) {
+      return {
+        session,
+        reachable: false,
+        mode: 'unreachable',
+        headed: null,
+        cdpConnected: false,
+        externalTarget: null,
+        cdpUrl: null,
+        profile: null,
+        daemonPid: meta.pid,
+        startedAt: null,
+        uptimeMs: null,
+        socketDir: meta.socketDir,
+        transport: meta.transport,
+        socketPath: meta.socketPath,
+        port: meta.port,
+        pidPath: meta.pidPath,
+        versionPath: meta.versionPath,
+        daemonVersion: meta.version,
+        pidFromFile: meta.pid,
+        error: res.error || 'status request failed',
+      };
+    }
+    return parseSessionStatusData(session, res.data);
+  } catch (e) {
+    return {
+      session,
+      reachable: false,
+      mode: 'unreachable',
+      headed: null,
+      cdpConnected: false,
+      externalTarget: null,
+      cdpUrl: null,
+      profile: null,
+      daemonPid: meta.pid,
+      startedAt: null,
+      uptimeMs: null,
+      socketDir: meta.socketDir,
+      transport: meta.transport,
+      socketPath: meta.socketPath,
+      port: meta.port,
+      pidPath: meta.pidPath,
+      versionPath: meta.versionPath,
+      daemonVersion: meta.version,
+      pidFromFile: meta.pid,
+      error: e instanceof Error ? e.message : String(e),
+    };
+  }
+}
+
 function printHumanSuccess(command: { action?: string }, response: { data?: any }): void {
   const action = command.action || '';
   const data = response.data || {};
@@ -692,13 +836,44 @@ async function main() {
     }
     if (sub === 'list') {
       const sessions = connection.listActiveSessions();
+      const sessionStatuses = await Promise.all(
+        sessions.map((s) => collectSessionStatus(s))
+      );
       if (jsonMode) {
-        printJsonValue({ success: true, activeSessions: sessions, currentSession: defaultSession });
+        printJsonValue({
+          success: true,
+          activeSessions: sessions,
+          currentSession: defaultSession,
+          sessions: sessionStatuses,
+        });
       } else {
         console.log('Active sessions:');
-        for (const s of sessions) {
-          const marker = s === defaultSession ? '->' : '  ';
-          console.log(`${marker} ${s}`);
+        for (const st of sessionStatuses) {
+          const marker = st.session === defaultSession ? '->' : '  ';
+          const mode = st.mode || 'unknown';
+          const headedText =
+            st.headed === null ? 'unknown' : (st.headed ? 'headed' : 'headless');
+          const cdpText = st.cdpConnected ? 'up' : 'down';
+          const endpoint = shortCdpEndpoint(st.cdpUrl);
+          const target = st.externalTarget ? ` target=${st.externalTarget}` : '';
+          const endpointText = endpoint ? ` cdp=${endpoint}` : '';
+          const engineText = st.engine ? ` engine=${st.engine}` : '';
+          const profileText = st.profile ? ` profile=${st.profile}` : '';
+          const pidText = st.daemonPid ? ` pid=${st.daemonPid}` : '';
+          const versionText = st.daemonVersion ? ` ver=${st.daemonVersion}` : '';
+          const transportText = st.transport === 'tcp'
+            ? ` transport=tcp:${st.port ?? 'n/a'}`
+            : ` transport=unix`;
+          const uptimeText =
+            typeof st.uptimeMs === 'number' ? ` uptime=${Math.floor(st.uptimeMs / 1000)}s` : '';
+          const err = st.error ? ` error=${st.error}` : '';
+          console.log(
+            `${marker} ${st.session} [${mode}] ${headedText} cdp:${cdpText}${engineText}${profileText}${pidText}${versionText}${transportText}${endpointText}${target}${uptimeText}${err}`
+          );
+          const startedAtText = st.startedAt ? st.startedAt : 'unknown';
+          const socketText = st.socketPath ? st.socketPath : '-';
+          console.log(`   startedAt=${startedAtText} socketDir=${st.socketDir}`);
+          console.log(`   pidFile=${st.pidPath} versionFile=${st.versionPath} socket=${socketText}`);
         }
       }
       return;

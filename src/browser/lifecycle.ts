@@ -184,6 +184,8 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.browser = await BrowserManager.connect(cdpUrl);
     state.isCdpConnection = true;
     state.externalTargetKey = requestedExternalTarget;
+    state.launchHeadless = null;
+    state.launchProfile = null;
     state.subscribeToEvents();
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();
@@ -202,6 +204,8 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.browser = await BrowserManager.connect(`127.0.0.1:${cdpPort}`);
     state.isCdpConnection = true;
     state.externalTargetKey = requestedExternalTarget;
+    state.launchHeadless = null;
+    state.launchProfile = null;
     state.subscribeToEvents();
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();
@@ -221,6 +225,8 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     // state.browser = await connectAutoWithFreshTab();
     state.isCdpConnection = true;
     state.externalTargetKey = requestedExternalTarget;
+    state.launchHeadless = null;
+    state.launchProfile = null;
     state.subscribeToEvents();
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();
@@ -272,6 +278,8 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     state.launchHash = newHash;
     state.isCdpConnection = false;
     state.externalTargetKey = null;
+    state.launchHeadless = Boolean(launchOptions.headless);
+    state.launchProfile = launchOptions.profile || null;
     state.subscribeToEvents();
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();

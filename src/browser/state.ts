@@ -202,6 +202,12 @@ export class DaemonState extends EventEmitter {
   isCdpConnection = false;
   // Last requested external CDP target key for connect target change detection.
   externalTargetKey: string | null = null;
+  // Runtime launch mode for managed browser. null means unknown or external CDP.
+  launchHeadless: boolean | null = null;
+  // Managed browser launch profile path/name when known.
+  launchProfile: string | null = null;
+  // Daemon boot timestamp.
+  startedAtMs: number;
 
   // Background tasks
   private fetchHandlerTask: any | null = null;
@@ -243,6 +249,7 @@ export class DaemonState extends EventEmitter {
     this.eventTracker = new EventTracker();
     this.sessionName = process.env.CLAW_BROWSER_SESSION_NAME || null;
     this.sessionId = process.env.CLAW_BROWSER_SESSION || 'default';
+    this.startedAtMs = Date.now();
 
     // Auto-dialog disabled if env var is set
     const noAutoDialog = process.env.CLAW_BROWSER_NO_AUTO_DIALOG;

@@ -347,6 +347,66 @@ export async function handleInspect(cmd: any, state: DaemonState): Promise<any> 
   }
 }
 
+export async function handleSessionStatus(cmd: any, state: DaemonState): Promise<any> {
+  const id = cmd.id || '';
+  const defaultHeaded = process.env.CLAW_BROWSER_HEADED === '1';
+  const configuredCdpTarget = (process.env.CLAW_BROWSER_CDP || '').trim() || null;
+  const configuredProfile = (process.env.CLAW_BROWSER_PROFILE || '').trim() || null;
+  const browser = state.browser;
+
+  let cdpConnected = false;
+  let cdpUrl: string | null = null;
+  if (browser) {
+    try {
+      cdpConnected = Boolean(await browser.isConnectionAlive?.());
+    } catch {
+      cdpConnected = false;
+    }
+    try {
+      cdpUrl = typeof browser.getCdpUrl === 'function' ? String(browser.getCdpUrl()) : null;
+    } catch {
+      cdpUrl = null;
+    }
+  }
+
+  const mode = !browser
+    ? 'idle'
+    : state.backendType === 'webdriver'
+      ? 'webdriver'
+      : state.isCdpConnection
+        ? 'external-cdp'
+        : 'managed-browser';
+
+  const headed =
+    state.launchHeadless === null
+      ? null
+      : !state.launchHeadless;
+  const startedAt = new Date(state.startedAtMs).toISOString();
+  const uptimeMs = Math.max(0, Date.now() - state.startedAtMs);
+
+  return ok(id, {
+    session: state.sessionId,
+    daemonPid: process.pid,
+    startedAt,
+    uptimeMs,
+    mode,
+    backendType: state.backendType,
+    engine: state.engine,
+    browserLaunched: Boolean(browser),
+    cdpConnected,
+    cdpUrl,
+    externalTarget: state.externalTargetKey,
+    headed,
+    launchHeadless: state.launchHeadless,
+    profile: state.launchProfile,
+    config: {
+      defaultHeaded,
+      configuredCdpTarget,
+      configuredProfile,
+    },
+  });
+}
+
 export async function handlePdf(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   const outPath = String(cmd.path || '').trim();

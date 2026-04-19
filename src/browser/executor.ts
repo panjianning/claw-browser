@@ -1,5 +1,59 @@
 import type { DaemonState } from './state.js';
 
+function parseShortTabIndex(value: string): number | null {
+  const m = /^t([1-9]\d*)$/i.exec(value.trim());
+  if (!m) {
+    return null;
+  }
+  const idx = parseInt(m[1], 10) - 1;
+  return Number.isNaN(idx) || idx < 0 ? null : idx;
+}
+
+function resolveTabIdReference(browser: any, tabRef: string): string {
+  const value = tabRef.trim();
+  if (!value) {
+    throw new Error('Tab not found: (empty)');
+  }
+
+  const pages = browser.getPages?.() || [];
+  const exact = pages.find((p: any) => p?.targetId === value);
+  if (exact?.targetId) {
+    return exact.targetId;
+  }
+
+  const shortIndex = parseShortTabIndex(value);
+  if (shortIndex !== null) {
+    const byShort = pages[shortIndex];
+    if (byShort?.targetId) {
+      return byShort.targetId;
+    }
+    throw new Error(`Tab not found: ${value}`);
+  }
+
+  const byLabel = browser.findTargetIdByLabel?.(value);
+  if (typeof byLabel === 'string' && byLabel.length > 0) {
+    return byLabel;
+  }
+
+  // Accept unique targetId prefix to make --tab-id easier to use in CLI.
+  const lowered = value.toLowerCase();
+  const prefixMatches = pages.filter((p: any) => {
+    const targetId = typeof p?.targetId === 'string' ? p.targetId : '';
+    return targetId.toLowerCase().startsWith(lowered);
+  });
+
+  if (prefixMatches.length === 1 && prefixMatches[0]?.targetId) {
+    return prefixMatches[0].targetId;
+  }
+  if (prefixMatches.length > 1) {
+    throw new Error(
+      `Tab id prefix is ambiguous: ${value} (${prefixMatches.length} matches)`
+    );
+  }
+
+  throw new Error(`Tab not found: ${value}`);
+}
+
 // ============================================================================
 // Response Helpers
 // ============================================================================
@@ -114,6 +168,7 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     'stream_enable',
     'stream_disable',
     'stream_status',
+    'session_status',
   ].includes(action);
 
   if (!skipLaunch) {
@@ -146,18 +201,20 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
 
   if (cmd.tabId && state.browser && action !== 'tab_switch' && action !== 'tab_list' && action !== 'tab_new') {
     try {
+      const resolvedTabId = resolveTabIdReference(state.browser, String(cmd.tabId));
+      cmd.tabId = resolvedTabId;
       if (isWaitAction) {
         const pages = state.browser.getPages?.() || [];
-        const page = pages.find((p: any) => p?.targetId === cmd.tabId);
+        const page = pages.find((p: any) => p?.targetId === resolvedTabId);
         if (!page?.sessionId) {
-          return errorResponse(id, `Tab not found: ${cmd.tabId}`);
+          return errorResponse(id, `Tab not found: ${String(cmd.tabId)}`);
         }
         cmd.sessionId = page.sessionId;
       } else {
-        state.browser.setActivePageByTargetId?.(cmd.tabId);
+        state.browser.setActivePageByTargetId?.(resolvedTabId);
       }
     } catch (error: any) {
-      return errorResponse(id, error?.message || `Tab not found: ${cmd.tabId}`);
+      return errorResponse(id, error?.message || `Tab not found: ${String(cmd.tabId)}`);
     }
   }
 
@@ -551,6 +608,8 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     // Advanced actions
     case 'inspect':
       return advanced.handleInspect(cmd, state);
+    case 'session_status':
+      return advanced.handleSessionStatus(cmd, state);
     case 'selectall':
       return advanced.handleSelectAll(cmd, state);
     case 'scrollintoview':

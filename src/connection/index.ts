@@ -16,6 +16,18 @@ export interface Response {
   warning?: string;
 }
 
+export interface SessionMetadata {
+  session: string;
+  socketDir: string;
+  transport: 'tcp' | 'unix';
+  socketPath: string | null;
+  port: number | null;
+  pidPath: string;
+  versionPath: string;
+  pid: number | null;
+  version: string | null;
+}
+
 export function listActiveSessions(): string[] {
   const dir = getSocketDir();
   let names: string[] = [];
@@ -35,6 +47,55 @@ export function listActiveSessions(): string[] {
   return names
     .filter((name) => daemonReady(name))
     .sort((a, b) => a.localeCompare(b));
+}
+
+export function getSessionMetadata(session: string): SessionMetadata {
+  const socketDir = getSocketDir();
+  const pidPath = getPidPath(session);
+  const versionPath = getVersionPath(session);
+
+  let pid: number | null = null;
+  try {
+    const raw = fs.readFileSync(pidPath, 'utf-8').trim();
+    const parsed = parseInt(raw, 10);
+    if (!Number.isNaN(parsed)) {
+      pid = parsed;
+    }
+  } catch {}
+
+  let version: string | null = null;
+  try {
+    const raw = fs.readFileSync(versionPath, 'utf-8').trim();
+    if (raw.length > 0) {
+      version = raw;
+    }
+  } catch {}
+
+  if (process.platform === 'win32') {
+    return {
+      session,
+      socketDir,
+      transport: 'tcp',
+      socketPath: null,
+      port: resolvePort(session),
+      pidPath,
+      versionPath,
+      pid,
+      version,
+    };
+  }
+
+  return {
+    session,
+    socketDir,
+    transport: 'unix',
+    socketPath: getSocketPath(session),
+    port: null,
+    pidPath,
+    versionPath,
+    pid,
+    version,
+  };
 }
 
 /**
