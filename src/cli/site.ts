@@ -14,6 +14,7 @@ const SITE_POOL_RETRY_MS = 120;
 interface ArgDef {
   required?: boolean;
   description?: string;
+  default?: unknown;
 }
 
 interface SiteMeta {
@@ -251,6 +252,98 @@ function formatSiteListHuman(sites: SiteMeta[]): string {
   return lines.join('\n');
 }
 
+function isHelpFlag(value: string | undefined): boolean {
+  return value === '--help' || value === '-h';
+}
+
+function printSiteHelp(jsonMode: boolean): void {
+  const helpText = [
+    'Usage:',
+    '  claw-browser site [list]',
+    '  claw-browser site search <query>',
+    '  claw-browser site info <name>',
+    '  claw-browser site update',
+    '  claw-browser site <adapter-name> [args...]',
+    '  claw-browser site run <adapter-name> [args...]',
+    '',
+    'Tips:',
+    '  claw-browser site info <name>         # show adapter arguments',
+    '  claw-browser site <name> --help       # show adapter help',
+    '  claw-browser site run <name> --help   # show adapter help',
+  ].join('\n');
+
+  if (jsonMode) {
+    printValue(true, {
+      success: true,
+      usage: [
+        'claw-browser site [list]',
+        'claw-browser site search <query>',
+        'claw-browser site info <name>',
+        'claw-browser site update',
+        'claw-browser site <adapter-name> [args...]',
+        'claw-browser site run <adapter-name> [args...]',
+      ],
+    });
+    return;
+  }
+
+  console.log(helpText);
+}
+
+function formatArgDefault(value: unknown): string {
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatArgHelpLines(site: SiteMeta): string[] {
+  const argEntries = Object.entries(site.args);
+  if (argEntries.length === 0) {
+    return ['  (none)'];
+  }
+
+  const lines: string[] = [];
+  for (const [argName, argDef] of argEntries) {
+    const required = argDef.required ? 'required' : 'optional';
+    const desc = argDef.description ? ` - ${argDef.description}` : '';
+    const defaultText =
+      argDef.default !== undefined ? ` (default: ${formatArgDefault(argDef.default)})` : '';
+    lines.push(`  ${argName} (${required})${defaultText}${desc}`);
+  }
+  return lines;
+}
+
+function printSiteInfo(site: SiteMeta, jsonMode: boolean): void {
+  if (jsonMode) {
+    printValue(true, {
+      name: site.name,
+      description: site.description,
+      domain: site.domain,
+      args: site.args,
+      example: site.example,
+      readOnly: site.readOnly,
+    });
+    return;
+  }
+
+  console.log(`${site.name} - ${site.description}`);
+  console.log('');
+  console.log('Arguments:');
+  for (const line of formatArgHelpLines(site)) {
+    console.log(line);
+  }
+  console.log('');
+  console.log('Example:');
+  console.log(`  ${site.example || `claw-browser site ${site.name}`}`);
+  console.log('');
+  console.log(`Domain: ${site.domain || '(not specified)'}`);
+  console.log(`Read-only: ${site.readOnly ? 'yes' : 'no'}`);
+}
+
 function parseAdapterArgs(site: SiteMeta, args: string[]): Record<string, string> {
   const argMap: Record<string, string> = {};
   const positional: string[] = [];
@@ -284,8 +377,17 @@ function parseAdapterArgs(site: SiteMeta, args: string[]): Record<string, string
       const usageArgs = argNames
         .map((name) => (site.args[name]?.required ? `<${name}>` : `[${name}]`))
         .join(' ');
+      const argHelp = formatArgHelpLines(site).join('\n');
+      const example =
+        site.example && site.example.trim().length > 0
+          ? site.example.trim()
+          : `claw-browser site ${site.name} ${usageArgs}`.trim();
       throw new Error(
-        `Missing required argument '${argName}'. Usage: claw-browser site ${site.name} ${usageArgs}`
+        `Missing required argument '${argName}'.\n` +
+          `Usage: claw-browser site ${site.name} ${usageArgs}\n` +
+          `Arguments:\n${argHelp}\n` +
+          `Example: ${example}\n` +
+          `Tip: claw-browser site info ${site.name}`
       );
     }
   }
@@ -727,6 +829,11 @@ export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<
   const rest = args.slice(1);
   const sites = getAllSites();
 
+  if (sub === 'help' || isHelpFlag(sub)) {
+    printSiteHelp(opts.jsonMode);
+    return;
+  }
+
   if (!sub || sub === 'list') {
     if (opts.jsonMode) {
       const items = sites.map((site) => ({
@@ -788,37 +895,7 @@ export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<
       throw new Error(`site info: adapter "${name}" not found`);
     }
 
-    if (opts.jsonMode) {
-      printValue(true, {
-        name: site.name,
-        description: site.description,
-        domain: site.domain,
-        args: site.args,
-        example: site.example,
-        readOnly: site.readOnly,
-      });
-      return;
-    }
-
-    console.log(`${site.name} - ${site.description}`);
-    console.log('');
-    console.log('Arguments:');
-    const argEntries = Object.entries(site.args);
-    if (argEntries.length === 0) {
-      console.log('  (none)');
-    } else {
-      for (const [argName, argDef] of argEntries) {
-        const required = argDef.required ? 'required' : 'optional';
-        const desc = argDef.description ? ` ${argDef.description}` : '';
-        console.log(`  ${argName} (${required})${desc}`);
-      }
-    }
-    console.log('');
-    console.log('Example:');
-    console.log(`  ${site.example || `claw-browser site ${site.name}`}`);
-    console.log('');
-    console.log(`Domain: ${site.domain || '(not specified)'}`);
-    console.log(`Read-only: ${site.readOnly ? 'yes' : 'no'}`);
+    printSiteInfo(site, opts.jsonMode);
     return;
   }
 
@@ -846,6 +923,11 @@ export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<
       );
     }
     throw new Error(`site "${adapterName}" not found. Try: claw-browser site list`);
+  }
+
+  if (adapterArgs.some((arg) => isHelpFlag(arg))) {
+    printSiteInfo(site, opts.jsonMode);
+    return;
   }
 
   await runSiteAdapter(site, adapterArgs, opts);
