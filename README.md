@@ -125,7 +125,7 @@ Local adapter directory:
 Community adapter directory:
 
 ```text
-~/.claw-browser/agent-sites
+~/.claw-browser/claw-sites
 ```
 
 * Inspired by [bb-browser](https://github.com/epiral/bb-browser/)
