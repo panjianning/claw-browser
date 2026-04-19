@@ -1,6 +1,14 @@
 #!/usr/bin/env node
 
 import { parseCommand, isValidSessionName } from './cli/commands.js';
+import {
+  GLOBAL_FLAG_DEFS,
+  HELP_CATALOG,
+  HELP_EXAMPLES,
+  HELP_OVERVIEW_SECTIONS,
+  HELP_USAGE_LINES,
+  type HelpTopic,
+} from './cli/help-schema.js';
 import type { Flags } from './types/commands.js';
 import { InvalidSessionNameError } from './types/commands.js';
 import * as connection from './connection/index.js';
@@ -556,46 +564,89 @@ function listChromeProfiles(): Array<{ dir: string; name: string }> {
 function parseFlags(args: string[]): { flags: Flags; cleanedArgs: string[] } {
   const flags: Flags = {};
   const cleanedArgs: string[] = [];
+  const globalFlagMap = new Map(
+    GLOBAL_FLAG_DEFS.flatMap((def) => def.names.map((name) => [name, def] as const))
+  );
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-
-    if (arg === '--provider') {
-      flags.provider = args[i + 1];
-      i++;
-    } else if (arg === '--device') {
-      flags.device = args[i + 1];
-      i++;
-    } else if (arg === '--headers') {
-      flags.headers = args[i + 1];
-      i++;
-    } else if (arg === '--default-timeout') {
-      flags.defaultTimeout = parseInt(args[i + 1], 10);
-      i++;
-    } else if (arg === '--annotate') {
-      flags.cliAnnotate = true;
-    } else if (arg === '--headed') {
-      flags.headed = true;
-    } else if (arg === '--cdp') {
-      flags.cdp = args[i + 1];
-      i++;
-    } else if (arg === '--tab-id') {
-      flags.tabId = args[i + 1];
-      i++;
-    } else if (arg === '--session') {
-      flags.session = args[i + 1];
-      i++;
-    } else if (arg === '--profile') {
-      flags.profile = args[i + 1];
-      i++;
-    } else if (arg === '--json' || arg === '-j') {
-      flags.json = true;
-    } else {
+    const def = globalFlagMap.get(arg);
+    if (!def) {
       cleanedArgs.push(arg);
+      continue;
+    }
+
+    if (def.kind === 'boolean') {
+      (flags as any)[def.field] = true;
+      continue;
+    }
+
+    const value = args[i + 1];
+    i++;
+    if (def.kind === 'number') {
+      (flags as any)[def.field] = parseInt(value, 10);
+    } else {
+      (flags as any)[def.field] = value;
     }
   }
 
   return { flags, cleanedArgs };
+}
+
+const HELP_FLAGS = new Set(['--help', '-h']);
+
+function stripHelpFlags(args: string[]): string[] {
+  return args.filter((arg) => !HELP_FLAGS.has(arg));
+}
+
+function hasHelpFlag(args: string[]): boolean {
+  return args.some((arg) => HELP_FLAGS.has(arg));
+}
+
+function printHelpTopic(topic: HelpTopic): void {
+  console.log(`Usage: ${topic.usage}`);
+  if (topic.description) {
+    console.log(topic.description);
+  }
+  if (topic.subcommands) {
+    const subs = Object.keys(topic.subcommands).sort((a, b) => a.localeCompare(b));
+    if (subs.length > 0) {
+      console.log(`Subcommands: ${subs.join(', ')}`);
+    }
+  }
+}
+
+function printCommandHelp(args: string[]): boolean {
+  if (!hasHelpFlag(args)) return false;
+
+  const tokens = stripHelpFlags(args);
+  if (tokens.length === 0) {
+    printHelp();
+    return true;
+  }
+
+  const cmd = tokens[0].toLowerCase();
+  const sub = (tokens[1] || '').toLowerCase();
+  const topic = HELP_CATALOG[cmd];
+  if (!topic) {
+    printHelp();
+    return true;
+  }
+
+  if (sub && topic.subcommands?.[sub]) {
+    printHelpTopic(topic.subcommands[sub]);
+    return true;
+  }
+
+  if ((cmd === 'tab' || cmd === 'tabs') && sub) {
+    printHelpTopic(HELP_CATALOG.tab.subcommands!.switch);
+    console.log(`Example: claw-browser tab switch ${sub}`);
+    return true;
+  }
+
+  printHelpTopic(topic);
+
+  return true;
 }
 
 async function main() {
@@ -629,6 +680,12 @@ async function main() {
   // Handle built-in commands
   if (cleanedArgs.length === 0 || cleanedArgs[0] === 'help' || cleanedArgs[0] === '--help' || cleanedArgs[0] === '-h') {
     printHelp();
+    return;
+  }
+
+  // Keep site-specific help dispatch in runSiteCli so adapter help still works:
+  // claw-browser site <adapter> --help
+  if (cleanedArgs[0] !== 'site' && printCommandHelp(cleanedArgs)) {
     return;
   }
 
@@ -826,14 +883,6 @@ async function main() {
 
   if (cleanedArgs[0] === 'session') {
     const sub = cleanedArgs[1];
-    if (!sub) {
-      if (jsonMode) {
-        printJsonValue({ success: true, session: defaultSession });
-      } else {
-        console.log(defaultSession);
-      }
-      return;
-    }
     if (sub === 'list') {
       const sessions = connection.listActiveSessions();
       const sessionStatuses = await Promise.all(
@@ -878,10 +927,18 @@ async function main() {
       }
       return;
     }
+    if (!sub) {
+      if (jsonMode) {
+        printJsonError('Missing session subcommand. Use: session list');
+      } else {
+        console.error('Missing session subcommand. Use: session list');
+      }
+      process.exit(1);
+    }
     if (jsonMode) {
-      printJsonError('Unknown session subcommand. Use: session [list]');
+      printJsonError('Unknown session subcommand. Use: session list');
     } else {
-      console.error('Unknown session subcommand. Use: session [list]');
+      console.error('Unknown session subcommand. Use: session list');
     }
     process.exit(1);
   }
@@ -902,53 +959,8 @@ async function main() {
     return;
   }
 
-  // Detect if first arg is a session name or a command
-  // If it's a valid command, use default session
-  const possibleCommand = cleanedArgs[0];
-  const isCommand = [
-    'navigate', 'open', 'goto', 'back', 'forward', 'reload',
-    'click', 'dblclick', 'focus', 'fill', 'type', 'setvalue', 'press', 'key', 'keyboard', 'keydown', 'keyup',
-    'hover', 'select', 'check', 'uncheck', 'scroll', 'scrollintoview', 'scrollinto', 'drag', 'upload',
-    'snapshot', 'screenshot', 'pdf', 'get', 'is', 'find', 'wait', 'mouse',
-    'cookies', 'storage', 'network', 'set', 'route', 'unroute', 'console', 'errors',
-    'tab', 'tabs', 'window', 'frame', 'dialog',
-    'state', 'eval', 'evaluate', 'inspect', 'responsebody', 'bringtofront', 'highlight', 'selectall', 'clipboard', 'site', 'close', 'quit', 'exit',
-    'session', 'profiles'
-  ].includes(possibleCommand);
-
-  let session: string;
-  let commandArgs: string[];
-
-  if (isCommand) {
-    // Direct command mode: claw-browser open example.com
-    session = defaultSession;
-    commandArgs = cleanedArgs;
-  } else {
-    // Session mode: claw-browser my-session open example.com
-    session = cleanedArgs[0];
-    commandArgs = cleanedArgs.slice(1);
-
-    if (!isValidSessionName(session)) {
-      if (jsonMode) {
-        printJsonErrorWithType(
-          `Invalid session name: ${session}`,
-          'InvalidSessionName'
-        );
-      } else {
-        console.error(`Invalid session name: ${session}`);
-      }
-      process.exit(1);
-    }
-
-    if (commandArgs.length === 0) {
-      if (jsonMode) {
-        printJsonError('No command specified');
-      } else {
-        console.error('No command specified. Usage: claw-browser <session> <command> [args...]');
-      }
-      process.exit(1);
-    }
-  }
+  const session = defaultSession;
+  const commandArgs = cleanedArgs;
 
   try {
     if (commandArgs[0] === 'site') {
@@ -1037,110 +1049,49 @@ async function main() {
 }
 
 function printHelp(): void {
-  console.log(`
-claw-browser v${VERSION}
-Fast browser automation CLI for AI agents (TypeScript port)
+  const globalFlagsText = GLOBAL_FLAG_DEFS
+    .map((def) => {
+      const [primary, ...aliases] = def.names;
+      const label = def.kind === 'boolean' ? primary : `${primary} <value>`;
+      const aliasText = aliases.length > 0 ? ` (alias: ${aliases.join(', ')})` : '';
+      return `  ${label.padEnd(28, ' ')} ${def.description}${aliasText}`;
+    })
+    .join('\n');
 
-USAGE:
-  claw-browser <command> [args...]                # Use default session
-  claw-browser <session> <command> [args...]      # Use named session
-  claw-browser --session <name> <command> [...]   # Use session via flag
-  claw-browser start <session>                    # Start daemon session
-  claw-browser stop <session>                     # Stop daemon session
-  claw-browser connect <port|url> [session]       # Connect session to CDP
-  claw-browser session [list]                     # Show current or list active sessions
+  const usageText = HELP_USAGE_LINES.map((line) => `  ${line}`).join('\n');
+  const commandSectionsText = HELP_OVERVIEW_SECTIONS
+    .map((section) => {
+      const items = section.items
+        .map((item) => `    ${item.command.padEnd(28, ' ')} ${item.summary}`)
+        .join('\n');
+      return `  ${section.title}:\n${items}`;
+    })
+    .join('\n\n');
+  const directExamples = HELP_EXAMPLES.direct.map((line) => `  ${line}`).join('\n');
+  const sessionExamples = HELP_EXAMPLES.session.map((line) => `  ${line}`).join('\n');
 
-COMMANDS:
-  Navigation:
-    navigate, open, goto <url>  Navigate to URL
-    back                         Go back
-    forward                      Go forward
-    reload                       Reload page
-
-  Interaction:
-    click <selector>             Click element
-    fill <selector> <text>       Fill input field
-    type <selector> <text>       Type text into element
-    hover <selector>             Hover over element
-
-  Information:
-    snapshot [options]           Get accessibility tree
-    screenshot [selector]        Take screenshot
-    eval, evaluate <script>      Evaluate JavaScript in current page
-    get <field>                  Get text/html/value/attr/title/url/count/box/styles
-    is <field> <selector>        visible/enabled/checked
-    find <kind> <q> <action>     Find then act (click/fill/type/gettext/count)
-    site <subcommand>            Manage and run site adapters
-    console [--clear]            Show console messages
-    errors [--clear]             Show runtime errors
-
-  Tabs:
-    tab                          List tabs (shows short id, tabId, and optional label)
-    tab new [url]                Open a new tab (optionally navigate)
-    tab new --label docs [url]   Open a new tab with a label
-    tab <tN|label|tab-id>        Switch active tab
-    tab close [tN|label|tab-id]  Close tab (default: active)
-    window new                   Open a new window
-
-  Session:
-    start <session>              Start daemon session
-    stop <session>               Stop daemon session
-    connect <port|url> [session] Connect session to an existing Chrome CDP endpoint
-    session                      Show current session
-    session list                 List active sessions
-    profiles                     List local Chrome profiles
-
-  Misc:
-    frame <selector>             Scope to iframe
-    frame main                   Return to main frame
-    dialog <status|accept|dismiss> Manage JS dialogs
-    route <pattern>              Add request route
-    unroute [pattern]            Remove route(s)
-    network requests             Show tracked requests
-    network request <id>         Show one request
-    responsebody <id>            Get response body for request
-    inspect                      Print current CDP endpoint
-    highlight <selector>         Highlight an element
-    clipboard <read|write>       Clipboard read/write
-    help                         Show this help
-    version                      Show version
-
-EXAMPLES:
-  # Direct commands (use default session)
-  claw-browser open https://example.com
-  claw-browser click "button[type='submit']"
-  claw-browser snapshot
-  claw-browser eval "location.href"
-  claw-browser snapshot -i -u
-  claw-browser snapshot -s "#main" -d 4
-  claw-browser set media dark
-  claw-browser set timezone Asia/Shanghai
-  claw-browser set locale zh-CN
-  claw-browser set geo 31.2304 121.4737
-  claw-browser set content "<h1>Hello</h1>"
-  claw-browser find text "Sign in" click
-  claw-browser network requests --method GET
-  claw-browser dialog status
-  claw-browser site list
-  claw-browser site xhs/note --note_id 123
-  claw-browser tab list
-  claw-browser tab new --label docs https://claw-browser.dev
-  claw-browser tab t2
-  claw-browser tab close docs
-  claw-browser window new
-  claw-browser --tab-id <tab-id> eval "document.title"
-  claw-browser connect 9222
-  claw-browser connect ws://127.0.0.1:9222/devtools/browser/abc123
-
-  # Named session commands
-  claw-browser start my-session
-  claw-browser my-session navigate https://example.com
-  claw-browser my-session click "button[type='submit']"
-  claw-browser my-session snapshot
-  claw-browser stop my-session
-
-For more information, visit: https://claw-browser.dev
-`);
+  console.log([
+    `claw-browser v${VERSION}`,
+    'Fast browser automation CLI for AI agents (TypeScript port)',
+    '',
+    'USAGE:',
+    usageText,
+    '',
+    'GLOBAL OPTIONS:',
+    globalFlagsText,
+    '',
+    'COMMANDS:',
+    commandSectionsText,
+    '',
+    'EXAMPLES:',
+    '  # Direct commands (use default session)',
+    directExamples,
+    '',
+    '  # Named session commands',
+    sessionExamples,
+    '',
+    'For more information, visit: https://claw-browser.dev',
+  ].join('\n'));
 }
 
 main().catch((e) => {

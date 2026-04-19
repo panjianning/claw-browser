@@ -43,7 +43,6 @@
 
 - `claw-browser start <session>`
 - `claw-browser stop <session>`
-- `claw-browser <session> <command> ...`
 - `claw-browser --session <session> <command> ...`
 
 daemon 就绪由会话级 IPC 文件体现：
@@ -95,7 +94,7 @@ Session 隔离粒度包括：
 
 - `tab list`
 - `tab new [url]`
-- `tab <tN|label|tab-id>`
+- `tab <target>` (`target` = `tN` | tab label | tab-id)
 - `tab close [tN|label|tab-id]`
 - `window new [url]`
 

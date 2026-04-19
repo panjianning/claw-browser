@@ -848,13 +848,13 @@ function parseCommandInner(args: string[], flags: Flags): Command {
         return { id, action: 'tab_close', ...parseTabSelector(target) };
       } else if (sub === 'switch') {
         if (rest.length < 2) {
-          throw new MissingArgumentsError('tab switch', 'tab switch <tN|label|tab-id>');
+          throw new MissingArgumentsError('tab switch', 'tab switch <target>');
         }
         const target = rest[1];
         return { id, action: 'tab_switch', ...parseTabSelector(target) };
       } else {
         if (sub === '--help' || sub === '-h') {
-          throw new MissingArgumentsError('tab', 'tab [list|new|close|switch|<tN|label|tab-id>]');
+          throw new MissingArgumentsError('tab', 'tab [list|new|close|switch|<target>]');
         }
         return { id, action: 'tab_switch', ...parseTabSelector(sub) };
       }

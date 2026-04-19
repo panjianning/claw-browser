@@ -13,14 +13,13 @@ Source of truth:
 
 ```bash
 claw-browser <command> [args...]
-claw-browser <session> <command> [args...]
 claw-browser --session <name> <command> [args...]
 ```
 
 ## Global flags
 
 - `--session <name>`: select session
-- `--tab-id <tab-id>`: route command to a specific tab
+- `--tab-id <tab-id>` / `--tabid <tab-id>`: route command to a specific tab
 - `--profile <path-or-name>`: browser profile
 - `--cdp <port|url>`: connect daemon commands to CDP target
 - `--headed`: launch headed mode
@@ -30,6 +29,7 @@ claw-browser --session <name> <command> [args...]
 - `--provider <name>`: provider selector
 - `--device <name>`: device selector
 - `--headers <json>`: default headers for navigation
+- `--help` / `-h`: show scoped help for command/subcommand (for example, `open --help`, `network request --help`, `session --help`)
 
 ## Built-in process commands
 
@@ -38,7 +38,6 @@ claw-browser --session <name> <command> [args...]
 - `start [session]`
 - `stop [session]`
 - `connect <port|url> [session]`
-- `session`
 - `session list`
 - `profiles`
 
@@ -182,8 +181,8 @@ claw-browser --session <name> <command> [args...]
 - `tab list`
 - `tab new [url] [--label <name>]`
 - `tab close [tN|label|tab-id]`
-- `tab switch <tN|label|tab-id>`
-- `tab <tN|label|tab-id>` (direct switch)
+- `tab switch <target>` (`target` = `tN` | tab label | tab-id)
+- `tab <target>` (direct switch; same target formats)
 - `window new [url] [--label <name>]`
 - `frame <selector>`
 - `frame main`
@@ -236,4 +235,3 @@ These commands are parsed by CLI, but currently return a runtime not-implemented
 - `install`
 - `upgrade`
 - `chat`
-
