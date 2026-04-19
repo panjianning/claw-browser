@@ -3,6 +3,7 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import { DaemonState } from '../browser/state.js';
 import { executeCommand } from '../browser/executor.js';
+import { getSocketDir } from '../utils/socket-dir.js';
 
 /**
  * Daemon process - long-running background process per session
@@ -14,11 +15,6 @@ export interface DaemonOptions {
   preferredPort?: number;
   idleTimeoutMs?: number;
   debug?: boolean;
-}
-
-function getSocketDir(): string {
-  const homeDir = process.env.HOME || process.env.USERPROFILE || '/tmp';
-  return path.join(homeDir, '.claw-browser');
 }
 
 function getPortForSession(session: string): number {

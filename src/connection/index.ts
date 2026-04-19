@@ -1,10 +1,10 @@
 import * as net from 'net';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import { spawn, ChildProcess } from 'child_process';
 import { fileURLToPath } from 'url';
 import { dirname } from 'path';
+import { getSocketDir } from '../utils/socket-dir.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -96,33 +96,6 @@ export function getSessionMetadata(session: string): SessionMetadata {
     pid,
     version,
   };
-}
-
-/**
- * Get the base directory for socket/port files.
- * Priority: CLAW_BROWSER_SOCKET_DIR > XDG_RUNTIME_DIR > ~/.claw-browser > tmpdir
- */
-export function getSocketDir(): string {
-  // 1. Explicit override (ignore empty string)
-  const envDir = process.env.CLAW_BROWSER_SOCKET_DIR;
-  if (envDir && envDir.trim().length > 0) {
-    return envDir;
-  }
-
-  // 2. XDG_RUNTIME_DIR (Linux standard, ignore empty string)
-  const xdgRuntimeDir = process.env.XDG_RUNTIME_DIR;
-  if (xdgRuntimeDir && xdgRuntimeDir.trim().length > 0) {
-    return path.join(xdgRuntimeDir, 'claw-browser');
-  }
-
-  // 3. Home directory fallback (like Docker Desktop's ~/.docker/run/)
-  const homeDir = os.homedir();
-  if (homeDir) {
-    return path.join(homeDir, '.claw-browser');
-  }
-
-  // 4. Last resort: temp dir
-  return path.join(os.tmpdir(), 'claw-browser');
 }
 
 function getSocketPath(session: string): string {
