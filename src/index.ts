@@ -942,7 +942,7 @@ async function main() {
       }
       return;
     }
-    if (sub === 'stop_all') {
+    if (sub === 'stop-all') {
       try {
         const active = connection.listActiveSessions();
         const results: Array<{ session: string; success: boolean; error?: string }> = [];
@@ -977,16 +977,16 @@ async function main() {
     }
     if (!sub) {
       if (jsonMode) {
-        printJsonError('Missing session subcommand. Use: session <start|stop|stop_all|list>');
+        printJsonError('Missing session subcommand. Use: session <start|stop|stop-all|list>');
       } else {
-        console.error('Missing session subcommand. Use: session <start|stop|stop_all|list>');
+        console.error('Missing session subcommand. Use: session <start|stop|stop-all|list>');
       }
       process.exit(1);
     }
     if (jsonMode) {
-      printJsonError('Unknown session subcommand. Use: session <start|stop|stop_all|list>');
+      printJsonError('Unknown session subcommand. Use: session <start|stop|stop-all|list>');
     } else {
-      console.error('Unknown session subcommand. Use: session <start|stop|stop_all|list>');
+      console.error('Unknown session subcommand. Use: session <start|stop|stop-all|list>');
     }
     process.exit(1);
   }

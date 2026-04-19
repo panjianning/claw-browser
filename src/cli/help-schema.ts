@@ -216,12 +216,12 @@ export const HELP_CATALOG: Record<string, HelpTopic> = {
   },
   site: { usage: 'claw-browser [global options] site <list|search|info|update|<adapter>> [args...]' },
   session: {
-    usage: 'claw-browser session <start|stop|stop_all|list> [session]',
+    usage: 'claw-browser session <start|stop|stop-all|list> [session]',
     description: 'Manage daemon sessions.',
     subcommands: {
       start: { usage: 'claw-browser session start [session]', description: 'Start a daemon session.' },
       stop: { usage: 'claw-browser session stop [session]', description: 'Stop a daemon session.' },
-      stop_all: { usage: 'claw-browser session stop_all', description: 'Stop all active daemon sessions.' },
+      "stop-all": { usage: 'claw-browser session stop-all', description: 'Stop all active daemon sessions.' },
       list: { usage: 'claw-browser session list', description: 'List active sessions with status details.' },
     },
   },
@@ -241,7 +241,7 @@ export const HELP_USAGE_LINES: string[] = [
   'claw-browser --session <name> <command> [...]   # Use session via flag',
   'claw-browser session start [session]            # Start daemon session',
   'claw-browser session stop [session]             # Stop daemon session',
-  'claw-browser session stop_all                   # Stop all active sessions',
+  'claw-browser session stop-all                   # Stop all active sessions',
   'claw-browser connect <port|url> [session]       # Connect session to CDP',
   'claw-browser session list                       # List active sessions',
 ];
@@ -298,7 +298,7 @@ export const HELP_OVERVIEW_SECTIONS: HelpOverviewSection[] = [
     items: [
       { command: 'session start [session]', summary: 'Start daemon session' },
       { command: 'session stop [session]', summary: 'Stop daemon session' },
-      { command: 'session stop_all', summary: 'Stop all active daemon sessions' },
+      { command: 'session stop-all', summary: 'Stop all active daemon sessions' },
       { command: 'connect <port|url> [session]', summary: 'Connect session to an existing Chrome CDP endpoint' },
       { command: 'session list', summary: 'List active sessions' },
       { command: 'profiles', summary: 'List local Chrome profiles' },
