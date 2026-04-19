@@ -128,6 +128,8 @@ Community adapter directory:
 ~/.claw-browser/agent-sites
 ```
 
+* Inspired by [bb-browser](https://github.com/epiral/bb-browser/)
+
 ### Domain Tab Pooling for `site`
 
 For adapters with a declared `domain`, `claw-browser` now manages per-domain tab leases:
