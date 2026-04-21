@@ -428,85 +428,96 @@ export async function ensureDaemon(
     throw new Error(`Socket directory '${socketDir}' is not writable: ${e}`);
   }
 
-  // Spawn daemon process
-  const env = { ...process.env };
-  applyDaemonEnv(env, session, opts);
+  const MAX_START_ATTEMPTS = 2;
+  for (let startAttempt = 0; startAttempt < MAX_START_ATTEMPTS; startAttempt++) {
+    // Spawn daemon process
+    const env = { ...process.env };
+    applyDaemonEnv(env, session, opts);
 
-  // The daemon script is in the same directory as this compiled file
-  const daemonScript = path.join(__dirname, 'index.js');
+    // The daemon script is in the same directory as this compiled file
+    const daemonScript = path.join(__dirname, 'index.js');
 
-  if (opts.debug) {
-    console.error(`[connection] Spawning daemon: ${process.execPath} ${daemonScript}`);
-    console.error(`[connection] With env: CLAW_BROWSER_DAEMON=1, SESSION=${session}`);
-  }
-
-  const daemonChild = spawn(process.execPath, [daemonScript], {
-    env,
-    detached: true,
-    stdio: opts.debug ? ['ignore', 'inherit', 'inherit'] : ['ignore', 'ignore', 'pipe'],
-  });
-
-  let stderrOutput = '';
-  const onStderrData = (data: Buffer) => {
-    stderrOutput += data.toString();
-    // Keep only recent output to avoid unbounded growth.
-    if (stderrOutput.length > 8192) {
-      stderrOutput = stderrOutput.slice(-8192);
+    if (opts.debug) {
+      console.error(`[connection] Spawning daemon: ${process.execPath} ${daemonScript}`);
+      console.error(`[connection] With env: CLAW_BROWSER_DAEMON=1, SESSION=${session}`);
     }
-  };
 
-  if (!opts.debug && daemonChild.stderr) {
-    // Collect stderr for non-debug mode error reporting.
-    daemonChild.stderr.on('data', onStderrData);
-  }
+    const daemonChild = spawn(process.execPath, [daemonScript], {
+      env,
+      detached: true,
+      stdio: opts.debug ? ['ignore', 'inherit', 'inherit'] : ['ignore', 'ignore', 'pipe'],
+    });
 
-  const cleanupChildStdio = () => {
+    let stderrOutput = '';
+    const onStderrData = (data: Buffer) => {
+      stderrOutput += data.toString();
+      // Keep only recent output to avoid unbounded growth.
+      if (stderrOutput.length > 8192) {
+        stderrOutput = stderrOutput.slice(-8192);
+      }
+    };
+
     if (!opts.debug && daemonChild.stderr) {
-      daemonChild.stderr.off('data', onStderrData);
-      daemonChild.stderr.destroy();
-    }
-  };
-
-  daemonChild.unref();
-
-  // Wait for daemon to be ready
-  for (let i = 0; i < 50; i++) {
-    if (daemonReady(session)) {
-      cleanupChildStdio();
-      return { alreadyRunning: false };
+      // Collect stderr for non-debug mode error reporting.
+      daemonChild.stderr.on('data', onStderrData);
     }
 
-    // Detect early daemon exit
-    if (daemonChild.killed || daemonChild.exitCode !== null) {
-      await sleep(100);
-      const stderrTrimmed = stderrOutput.trim();
+    const cleanupChildStdio = () => {
+      if (!opts.debug && daemonChild.stderr) {
+        daemonChild.stderr.off('data', onStderrData);
+        daemonChild.stderr.destroy();
+      }
+    };
 
-      // If daemon failed due to bind race, check if winner is accepting
-      if (stderrTrimmed.includes('Address already in use') || stderrTrimmed.includes('Failed to bind')) {
-        await sleep(200);
-        if (daemonReady(session)) {
-          cleanupChildStdio();
-          return { alreadyRunning: true };
+    daemonChild.unref();
+
+    // Wait for daemon to be ready
+    for (let i = 0; i < 50; i++) {
+      if (daemonReady(session)) {
+        cleanupChildStdio();
+        return { alreadyRunning: false };
+      }
+
+      // Detect early daemon exit
+      if (daemonChild.killed || daemonChild.exitCode !== null) {
+        await sleep(100);
+        const stderrTrimmed = stderrOutput.trim();
+
+        // If daemon failed due to bind race, check if winner is accepting.
+        // Important: only reuse winner when version also matches current CLI.
+        if (stderrTrimmed.includes('Address already in use') || stderrTrimmed.includes('Failed to bind')) {
+          await sleep(200);
+          if (daemonReady(session) && await daemonAcceptingConnections(session)) {
+            if (daemonVersionMatches(session, currentVersion)) {
+              cleanupChildStdio();
+              return { alreadyRunning: true };
+            }
+
+            // Stale daemon won the bind race. Kill and retry one more time.
+            await killStaleDaemon(session);
+            cleanupStaleFiles(session);
+            cleanupChildStdio();
+            break;
+          }
         }
+
+        cleanupChildStdio();
+        if (stderrTrimmed.length > 0) {
+          const msg = stderrTrimmed.length > 500 ? stderrTrimmed.slice(0, 500) : stderrTrimmed;
+          throw new Error(`Daemon process exited during startup:\n${msg}`);
+        }
+        throw new Error('Daemon process exited during startup with no error output. Re-run with --debug for more details.');
       }
 
-      cleanupChildStdio();
-      if (stderrTrimmed.length > 0) {
-        const msg = stderrTrimmed.length > 500 ? stderrTrimmed.slice(0, 500) : stderrTrimmed;
-        throw new Error(`Daemon process exited during startup:\n${msg}`);
-      }
-      throw new Error('Daemon process exited during startup with no error output. Re-run with --debug for more details.');
+      await sleep(100);
     }
-
-    await sleep(100);
   }
 
-  cleanupChildStdio();
   const endpointInfo = process.platform !== 'win32'
     ? `socket: ${getSocketPath(session)}`
     : `port: 127.0.0.1:${resolvePort(session)}`;
 
-  throw new Error(`Daemon failed to start (${endpointInfo})`);
+  throw new Error(`Daemon failed to start after retry (${endpointInfo})`);
 }
 
 /**
