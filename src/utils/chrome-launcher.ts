@@ -1,6 +1,7 @@
 import { spawn, ChildProcess } from 'child_process';
-import { mkdirSync, rmSync, readFileSync, unlinkSync } from 'fs';
+import { mkdirSync } from 'fs';
 import { homedir } from 'os';
+import net from 'net';
 import path from 'path';
 import { findChrome } from './chrome-finder.js';
 
@@ -27,7 +28,6 @@ export interface LaunchOptions {
 export interface ChromeProcess {
   process: ChildProcess;
   wsUrl: string;
-  tempUserDataDir?: string;
   kill: () => void;
   hasExited: () => boolean;
 }
@@ -35,7 +35,7 @@ export interface ChromeProcess {
 interface ChromeArgs {
   args: string[];
   userDataDir: string;
-  tempUserDataDir?: string;
+  remoteDebuggingPort: number;
 }
 
 function resolveDefaultUserDataDir(): string {
@@ -44,9 +44,36 @@ function resolveDefaultUserDataDir(): string {
   return path.join(homedir(), '.claw-browser', 'browser', session);
 }
 
-function buildChromeArgs(options: LaunchOptions): ChromeArgs {
+function findAvailablePort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.unref();
+
+    server.on('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') {
+        server.close(() => reject(new Error('Failed to allocate remote debugging port')));
+        return;
+      }
+
+      const { port } = address;
+      server.close((err) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(port);
+      });
+    });
+  });
+}
+
+async function buildChromeArgs(options: LaunchOptions): Promise<ChromeArgs> {
+  const remoteDebuggingPort = await findAvailablePort();
   const args: string[] = [
-    '--remote-debugging-port=0',
+    `--remote-debugging-port=${remoteDebuggingPort}`,
+    '--remote-debugging-address=127.0.0.1',
     '--no-first-run',
     '--no-default-browser-check',
     '--disable-background-networking',
@@ -84,8 +111,6 @@ function buildChromeArgs(options: LaunchOptions): ChromeArgs {
   }
 
   let userDataDir: string;
-  let tempUserDataDir: string | undefined;
-
   if (options.profile) {
     // Expand tilde
     userDataDir = options.profile.replace(/^~/, process.env.HOME || process.env.USERPROFILE || '');
@@ -137,7 +162,7 @@ function buildChromeArgs(options: LaunchOptions): ChromeArgs {
   return {
     args,
     userDataDir,
-    tempUserDataDir,
+    remoteDebuggingPort,
   };
 }
 
@@ -180,22 +205,14 @@ export async function launchChrome(options: LaunchOptions = {}): Promise<ChromeP
     );
   }
 
-  const { args, userDataDir, tempUserDataDir } = buildChromeArgs(options);
-
-  // Clean up stale DevToolsActivePort file
-  const devToolsActivePortPath = path.join(userDataDir, 'DevToolsActivePort');
-  try {
-    unlinkSync(devToolsActivePortPath);
-  } catch {
-    // Ignore if file doesn't exist
-  }
+  const { args, remoteDebuggingPort } = await buildChromeArgs(options);
 
   const child = spawn(chromePath, args, {
     detached: false,
     stdio: ['ignore', 'ignore', 'pipe'],
   });
 
-  const wsUrl = await waitForWsUrl(child, userDataDir, tempUserDataDir);
+  const wsUrl = await waitForWsUrl(child, remoteDebuggingPort);
 
   const killFn = () => {
     try {
@@ -210,14 +227,6 @@ export async function launchChrome(options: LaunchOptions = {}): Promise<ChromeP
       // Ignore errors
     }
 
-    // Clean up temp directory
-    if (tempUserDataDir) {
-      try {
-        rmSync(tempUserDataDir, { recursive: true, force: true });
-      } catch (err) {
-        console.error(`Warning: failed to clean up temp profile ${tempUserDataDir}:`, err);
-      }
-    }
   };
 
   const hasExitedFn = () => {
@@ -230,87 +239,44 @@ export async function launchChrome(options: LaunchOptions = {}): Promise<ChromeP
   return {
     process: child,
     wsUrl,
-    tempUserDataDir,
     kill: killFn,
     hasExited: hasExitedFn,
   };
 }
 
 /**
- * Wait for Chrome to write WebSocket URL to stderr or DevToolsActivePort file
+ * Wait for Chrome DevTools endpoint via /json/version.
  */
-async function waitForWsUrl(
-  child: ChildProcess,
-  userDataDir: string,
-  tempUserDataDir?: string
-): Promise<string> {
+async function waitForWsUrl(child: ChildProcess, remoteDebuggingPort: number): Promise<string> {
   const deadline = Date.now() + 30000; // 30 second timeout
-
-  // First try reading DevToolsActivePort file (more reliable on Windows)
-  const devToolsPath = path.join(userDataDir, 'DevToolsActivePort');
+  const versionUrl = `http://127.0.0.1:${remoteDebuggingPort}/json/version`;
   const pollInterval = 50;
 
   while (Date.now() < deadline) {
     // Check if process exited early
     if (child.exitCode !== null) {
-      if (tempUserDataDir) {
-        try {
-          rmSync(tempUserDataDir, { recursive: true, force: true });
-        } catch {
-          // Ignore cleanup errors
-        }
-      }
       throw new Error(`Chrome exited early with code ${child.exitCode}`);
     }
 
-    // Try reading DevToolsActivePort
     try {
-      const content = readFileSync(devToolsPath, 'utf-8');
-      const lines = content.split('\n');
-      if (lines.length >= 2) {
-        const port = lines[0].trim();
-        const wsPath = lines[1].trim();
-        if (port && wsPath) {
-          return `ws://127.0.0.1:${port}${wsPath}`;
+      const response = await fetch(versionUrl);
+      if (response.ok) {
+        const payload = await response.json();
+        if (payload?.webSocketDebuggerUrl && typeof payload.webSocketDebuggerUrl === 'string') {
+          return payload.webSocketDebuggerUrl;
         }
       }
     } catch {
-      // File doesn't exist yet or not ready, continue polling
+      // Endpoint not available yet, continue polling.
     }
 
     await new Promise((resolve) => setTimeout(resolve, pollInterval));
   }
 
-  // Fallback: try parsing stderr
-  let stderrUrl: string | null = null;
-  if (child.stderr) {
-    child.stderr.on('data', (data) => {
-      const text = data.toString();
-      const match = text.match(/DevTools listening on (ws:\/\/[^\s]+)/);
-      if (match) {
-        stderrUrl = match[1];
-      }
-    });
-
-    // Wait a bit for stderr
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-
-  if (stderrUrl) {
-    return stderrUrl;
-  }
-
   // Timeout - kill and clean up
   child.kill();
-  if (tempUserDataDir) {
-    try {
-      rmSync(tempUserDataDir, { recursive: true, force: true });
-    } catch {
-      // Ignore cleanup errors
-    }
-  }
-
   throw new Error(
-    'Timeout waiting for Chrome DevTools URL. Chrome may have failed to start or DevToolsActivePort was not written.'
+    `Timeout waiting for Chrome DevTools URL from ${versionUrl}. ` +
+    'Chrome may have failed to start or /json/version was not ready in time.'
   );
 }
