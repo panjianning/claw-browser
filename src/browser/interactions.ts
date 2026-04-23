@@ -54,6 +54,14 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
 
   const button = cmd.button || 'left';
   const clickCount = cmd.clickCount || 1;
+
+  if (button === 'left' && clickCount === 1) {
+    const domClicked = await tryDomClickOnAboutBlank(mgr.client, objectId, effectiveSessionId);
+    if (domClicked) {
+      return { id, success: true, data: { clicked: selector } };
+    }
+  }
+
   const point = await getElementCenter(mgr.client, objectId, effectiveSessionId);
 
   await mgr.client.sendCommand(
@@ -673,6 +681,41 @@ async function getElementCenter(client: any, objectId: string, sessionId: string
   );
   const point = result?.result?.value || { x: 0, y: 0 };
   return { x: Number(point.x || 0), y: Number(point.y || 0) };
+}
+
+async function tryDomClickOnAboutBlank(client: any, objectId: string, sessionId: string): Promise<boolean> {
+  try {
+    const href = await client.sendCommand(
+      'Runtime.evaluate',
+      {
+        expression: 'location.href',
+        returnByValue: true,
+      },
+      sessionId
+    );
+    if (href?.result?.value !== 'about:blank') {
+      return false;
+    }
+
+    await client.sendCommand(
+      'Runtime.callFunctionOn',
+      {
+        objectId,
+        functionDeclaration: `function() {
+          if (typeof this.click === 'function') {
+            this.click();
+            return true;
+          }
+          this.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+          return true;
+        }`,
+      },
+      sessionId
+    );
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function resolveElementObjectId(
