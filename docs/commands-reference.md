@@ -19,7 +19,7 @@ claw-browser --session <name> <command> [args...]
 ## Global flags
 
 - `--session <name>`: select session
-- `--tab-id <tab-id>` / `--tabid <tab-id>`: route command to a specific tab
+- `--tab-id <tab-id>` / `--tabid <tab-id>`: required for most browser actions; route command to a specific tab
 - `--profile <path-or-name>`: browser profile
 - `--cdp <port|url>`: connect daemon commands to CDP target
 - `--headed`: launch headed mode (default)
@@ -42,6 +42,24 @@ claw-browser --session <name> <command> [args...]
 - `connect <port|url> [session]`
 - `session list`
 - `profiles`
+
+## `--tab-id` requirement
+
+Most parsed browser commands now require `--tab-id` to avoid implicit active-tab races in concurrent usage.
+
+Current no-`--tab-id` exceptions:
+
+- `tab list`
+- `tab new [url] [--label <name>]`
+- `tab switch <target>`
+- `tab close [target]`
+- `window new [url] [--label <name>]`
+- `state list|show|rename|clear|clean`
+- `inspect`
+- `stream enable|disable|status`
+- `install`
+- `upgrade`
+- `chat`
 
 ## Navigation
 

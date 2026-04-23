@@ -603,7 +603,7 @@ function resolveDaemonHeaded(flags: Flags): boolean {
   return true;
 }
 
-const HELP_FLAGS = new Set(['--help', '-h']);
+const HELP_FLAGS = new Set(['--help', '-h', '-help']);
 
 function stripHelpFlags(args: string[]): string[] {
   return args.filter((arg) => !HELP_FLAGS.has(arg));

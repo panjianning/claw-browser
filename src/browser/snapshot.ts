@@ -170,7 +170,8 @@ export async function handleScreenshot(cmd: any, state: DaemonState): Promise<an
       success: true,
       data: {
         path: savePath,
-        base64: finalData,
+        // don't return base64 data by default to avoid large payloads, can be added if needed
+        // base64: finalData,
       },
     };
   } catch (error: any) {

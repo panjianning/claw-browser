@@ -10,6 +10,7 @@ const COMMUNITY_REPO = 'https://github.com/panjianning/claw-sites.git';
 const DEFAULT_SITE_DOMAIN_MAX_TABS = 2;
 const SITE_POOL_LOCK_TIMEOUT_MS = 60_000;
 const SITE_POOL_RETRY_MS = 120;
+const SITE_POOL_STALE_LOCK_MAX_AGE_MS = 5 * 60_000;
 
 interface ArgDef {
   required?: boolean;
@@ -55,6 +56,11 @@ interface DomainPoolState {
   domains: Record<string, DomainPoolEntry>;
 }
 
+interface PoolLockOwner {
+  pid: number;
+  acquiredAt: number;
+}
+
 interface SiteTabLease {
   managed: true;
   session: string;
@@ -86,6 +92,10 @@ function getSitePoolStatePath(session: string): string {
 
 function getSitePoolLockPath(session: string): string {
   return path.join(getSitePoolDir(), `${session}.lock`);
+}
+
+function getSitePoolLockOwnerPath(lockPath: string): string {
+  return path.join(lockPath, 'owner.json');
 }
 
 function normalizeSiteName(filePath: string, baseDir: string): string {
@@ -450,6 +460,15 @@ function getMaxTabsPerDomain(): number {
   return DEFAULT_SITE_DOMAIN_MAX_TABS;
 }
 
+function getStaleLockMaxAgeMs(): number {
+  const raw = process.env.CLAW_BROWSER_SITE_LOCK_STALE_MS;
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
+  if (Number.isInteger(parsed) && parsed > 0) {
+    return parsed;
+  }
+  return SITE_POOL_STALE_LOCK_MAX_AGE_MS;
+}
+
 function ensurePoolDirs(): void {
   fs.mkdirSync(getSitePoolDir(), { recursive: true });
 }
@@ -502,15 +521,62 @@ function cleanupPoolState(state: DomainPoolState): void {
 async function withPoolLock<T>(session: string, fn: () => Promise<T>): Promise<T> {
   ensurePoolDirs();
   const lockPath = getSitePoolLockPath(session);
+  const ownerPath = getSitePoolLockOwnerPath(lockPath);
   const startedAt = Date.now();
+  const staleLockMaxAgeMs = getStaleLockMaxAgeMs();
+
+  const writeLockOwner = (): void => {
+    const owner: PoolLockOwner = {
+      pid: process.pid,
+      acquiredAt: Date.now(),
+    };
+    fs.writeFileSync(ownerPath, JSON.stringify(owner), 'utf-8');
+  };
+
+  const lockOwnerPid = (): number | null => {
+    try {
+      const raw = fs.readFileSync(ownerPath, 'utf-8');
+      const parsed = JSON.parse(raw) as Partial<PoolLockOwner>;
+      if (typeof parsed?.pid === 'number' && Number.isInteger(parsed.pid) && parsed.pid > 0) {
+        return parsed.pid;
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const tryRecoverStaleLock = (): boolean => {
+    try {
+      const pid = lockOwnerPid();
+      if (pid !== null && !processAlive(pid)) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+        return true;
+      }
+
+      const stat = fs.statSync(lockPath);
+      const ageMs = Date.now() - stat.mtimeMs;
+      if (ageMs > staleLockMaxAgeMs) {
+        fs.rmSync(lockPath, { recursive: true, force: true });
+        return true;
+      }
+    } catch {
+      // Ignore recovery race/errors and continue waiting.
+    }
+    return false;
+  };
 
   while (true) {
     try {
       fs.mkdirSync(lockPath);
+      writeLockOwner();
       break;
     } catch (error: any) {
       if (error?.code !== 'EEXIST') {
         throw error;
+      }
+      if (tryRecoverStaleLock()) {
+        continue;
       }
       if (Date.now() - startedAt > SITE_POOL_LOCK_TIMEOUT_MS) {
         throw new Error(`Timed out waiting for site pool lock (${session})`);
@@ -523,7 +589,7 @@ async function withPoolLock<T>(session: string, fn: () => Promise<T>): Promise<T
     return await fn();
   } finally {
     try {
-      fs.rmdirSync(lockPath);
+      fs.rmSync(lockPath, { recursive: true, force: true });
     } catch {
       // Ignore lock cleanup errors.
     }

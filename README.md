@@ -11,12 +11,13 @@ npm install -g claw-browser
 ## Quick Start
 
 ```bash
-claw-browser open https://example.com
-claw-browser snapshot -i
-claw-browser click @e2
-claw-browser fill @e3 "hello"
-claw-browser get title
-claw-browser screenshot
+claw-browser tab new https://example.com
+claw-browser tab list
+claw-browser --tab-id <tab-id-or-prefix> snapshot -i
+claw-browser --tab-id <tab-id-or-prefix> click @e2
+claw-browser --tab-id <tab-id-or-prefix> fill @e3 "hello"
+claw-browser --tab-id <tab-id-or-prefix> get title
+claw-browser --tab-id <tab-id-or-prefix> screenshot
 ```
 
 ## Google Workflow (Recommended)
@@ -53,13 +54,13 @@ Notes:
 ## Core Commands
 
 ```bash
-claw-browser open <url>
-claw-browser click <selector-or-ref>
-claw-browser fill <selector-or-ref> <text>
-claw-browser type <selector-or-ref> <text>
-claw-browser snapshot
-claw-browser screenshot [path]
-claw-browser evaluate <script>
+claw-browser --tab-id <tab-id-or-prefix> open <url>
+claw-browser --tab-id <tab-id-or-prefix> click <selector-or-ref>
+claw-browser --tab-id <tab-id-or-prefix> fill <selector-or-ref> <text>
+claw-browser --tab-id <tab-id-or-prefix> type <selector-or-ref> <text>
+claw-browser --tab-id <tab-id-or-prefix> snapshot
+claw-browser --tab-id <tab-id-or-prefix> screenshot [path]
+claw-browser --tab-id <tab-id-or-prefix> evaluate <script>
 ```
 
 Tabs:
@@ -71,7 +72,9 @@ claw-browser tab <tN|label|tab-id>
 claw-browser tab close [tN|label|tab-id]
 ```
 
-For multi-tab or concurrent agent usage, prefer:
+Most browser commands now require `--tab-id` (except tab-management commands like `tab new/list/switch/close`, plus `window new`).
+
+For multi-tab or concurrent agent usage:
 
 ```bash
 claw-browser --tab-id <tab-id-or-prefix> <command> ...
@@ -80,10 +83,10 @@ claw-browser --tab-id <tab-id-or-prefix> <command> ...
 Wait:
 
 ```bash
-claw-browser wait 1000
-claw-browser wait "#submit"
-claw-browser waitforurl "**/dashboard"
-claw-browser waitforloadstate networkidle
+claw-browser --tab-id <tab-id-or-prefix> wait 1000
+claw-browser --tab-id <tab-id-or-prefix> wait "#submit"
+claw-browser --tab-id <tab-id-or-prefix> wait --url "**/dashboard"
+claw-browser --tab-id <tab-id-or-prefix> wait --load networkidle
 ```
 
 ## Sessions and Data Directory

@@ -17,23 +17,29 @@ allowed-tools: Bash(claw-browser:*)
 ## 快速开始
 
 ```bash
-claw-browser open https://example.com
-claw-browser snapshot -i
-claw-browser click "@e2"
-claw-browser fill "@e3" "hello"
-claw-browser get title
-claw-browser screenshot
+claw-browser tab new https://example.com
+claw-browser tab list
+claw-browser --tab-id <tab-id-or-prefix> snapshot -i
+claw-browser --tab-id <tab-id-or-prefix> click "@e2"
+claw-browser --tab-id <tab-id-or-prefix> fill "@e3" "hello"
+claw-browser --tab-id <tab-id-or-prefix> get title
+claw-browser --tab-id <tab-id-or-prefix> screenshot
 ```
 
 ## 核心工作流
 
-1. `open` 打开页面
-2. `snapshot -i` 获取可交互元素（`@eN`）
-3. 用 `@eN` 执行交互（`click`、`fill`、`press` 等）
-4. 页面变化后重新 `snapshot -i`
-5. 用 `get` / `eval` / `screenshot` 采集结果
+1. `tab new` 打开页面并创建 tab
+2. `tab list` 获取 `tab-id`
+3. `--tab-id ... snapshot -i` 获取可交互元素（`@eN`）
+4. 用 `--tab-id` + `@eN` 执行交互（`click`、`fill`、`press` 等）
+5. 页面变化后重新 `--tab-id ... snapshot -i`
+6. 用 `--tab-id` + `get` / `eval` / `screenshot` 采集结果
 
 ## 命令速查
+
+默认规则：
+- 除 `tab list/new/switch/close`、`window new`、`state list/show/rename/clear/clean`、`inspect`、`stream enable/disable/status`、`install`、`upgrade`、`chat` 外，命令都必须带 `--tab-id <tab-id-or-prefix>`。
+- 下方命令如未显式写出 `--tab-id`，按简写展示；实际执行时请写成：`claw-browser --tab-id <tab-id-or-prefix> <command> ...`。
 
 ### 导航
 
@@ -215,7 +221,7 @@ claw-browser version
 ```bash
 --session <name>            # 选择 session
 --profile <path|name>       # 指定浏览器 profile
---tab-id <id-or-prefix>     # 将命令路由到指定 tab
+--tab-id <id-or-prefix>     # 大多数命令必填：将命令路由到指定 tab
 --cdp <url>                 # 连接指定 CDP endpoint
 --provider <name>           # provider 选择
 --device <name>             # 设备配置

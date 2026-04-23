@@ -6,6 +6,35 @@ import {
   InvalidValueError,
 } from '../types/commands.js';
 
+const TAB_ID_OPTIONAL_ACTIONS = new Set([
+  'tab_list',
+  'tab_new',
+  'tab_switch',
+  'tab_close',
+  'window_new',
+  'state_list',
+  'state_show',
+  'state_rename',
+  'state_clear',
+  'state_clean',
+  'inspect',
+  'stream_enable',
+  'stream_disable',
+  'stream_status',
+  'install',
+  'upgrade',
+  'chat',
+]);
+
+const TAB_ID_SKIP_BIND_ACTIONS = new Set([
+  'launch',
+  'close',
+  'tab_switch',
+  'tab_list',
+  'tab_new',
+  'tab_close',
+]);
+
 // Generate unique request ID
 export function genId(): string {
   const timestamp = Date.now() * 1000 + performance.now() * 1000;
@@ -27,21 +56,21 @@ export function isValidSessionName(name: string): boolean {
 export function parseCommand(args: string[], flags: Flags = {}): Command {
   const result = parseCommandInner(args, flags);
 
+  if (!flags.tabId && !TAB_ID_OPTIONAL_ACTIONS.has(result.action)) {
+    const cmdText = args.join(' ');
+    throw new InvalidValueError(
+      'Missing required global option: --tab-id',
+      `--tab-id <tab-id> ${cmdText}`.trim()
+    );
+  }
+
   // Inject default timeout into wait-family commands if not already present
   if (result.action.startsWith('wait') && !result.timeout && flags.defaultTimeout) {
     result.timeout = flags.defaultTimeout;
   }
 
   if (flags.tabId) {
-    const skipTabBinding = new Set([
-      'launch',
-      'close',
-      'tab_switch',
-      'tab_list',
-      'tab_new',
-      'tab_close',
-    ]);
-    if (!skipTabBinding.has(result.action)) {
+    if (!TAB_ID_SKIP_BIND_ACTIONS.has(result.action)) {
       result.tabId = flags.tabId;
     }
   }
