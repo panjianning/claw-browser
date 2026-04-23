@@ -245,11 +245,6 @@ export async function takeSnapshot(
       continue;
     }
 
-    // Skip if name is empty for interactive elements
-    if (isInteractive && node.name.length === 0 && !hasCursorInfo) {
-      continue;
-    }
-
     const refId = `e${nextRef++}`;
 
     node.hasRef = true;
