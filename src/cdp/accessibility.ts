@@ -8,47 +8,34 @@ const INTERACTIVE_ROLES = new Set([
   'button',
   'link',
   'textbox',
-  'searchbox',
   'checkbox',
   'radio',
   'combobox',
-  'menu',
+  'listbox',
   'menuitem',
   'menuitemcheckbox',
   'menuitemradio',
-  'tab',
+  'option',
+  'searchbox',
   'slider',
   'spinbutton',
   'switch',
-  'scrollbar',
-  'progressbar',
-  'listbox',
-  'option',
-  'tree',
+  'tab',
   'treeitem',
-  'grid',
-  'gridcell',
-  'rowheader',
-  'columnheader',
-  'menubar',
-  'tablist',
-  'toolbar',
-  'disclosure',
+  'Iframe',
 ]);
 
 const CONTENT_ROLES = new Set([
   'heading',
   'cell',
+  'gridcell',
+  'columnheader',
+  'rowheader',
   'listitem',
   'article',
-  'blockquote',
-  'code',
-  'definition',
-  'figure',
-  'img',
-  'table',
-  'time',
-  'paragraph',
+  'region',
+  'main',
+  'navigation',
 ]);
 
 const INVISIBLE_CHARS = /[\u200B-\u200D\uFEFF]/g;
@@ -127,7 +114,6 @@ interface RefMapEntry {
   backendNodeId?: number;
   role: string;
   name: string;
-  url?: string;
 }
 
 class RefMap {
@@ -137,10 +123,9 @@ class RefMap {
     refId: string,
     backendNodeId: number | undefined,
     role: string,
-    name: string,
-    url?: string
+    name: string
   ): void {
-    this.map.set(refId, { backendNodeId, role, name, url });
+    this.map.set(refId, { backendNodeId, role, name });
   }
 
   entriesSorted(): Array<[string, RefMapEntry]> {
@@ -151,40 +136,15 @@ class RefMap {
     });
   }
 
-  toObject(): Record<string, { role: string; name: string; url?: string }> {
-    const result: Record<string, { role: string; name: string; url?: string }> = {};
+  toObject(): Record<string, { role: string; name: string }> {
+    const result: Record<string, { role: string; name: string }> = {};
     for (const [refId, entry] of this.entriesSorted()) {
       result[refId] = {
         role: entry.role,
         name: entry.name,
-        ...(entry.url && { url: entry.url }),
       };
     }
     return result;
-  }
-}
-
-class RoleNameTracker {
-  private counts = new Map<string, number>();
-  private duplicates = new Map<string, number[]>();
-
-  track(role: string, name: string, index: number): number {
-    const key = `${role}:${name}`;
-    const count = this.counts.get(key) || 0;
-    this.counts.set(key, count + 1);
-
-    if (count > 0) {
-      if (!this.duplicates.has(key)) {
-        this.duplicates.set(key, []);
-      }
-      this.duplicates.get(key)!.push(index);
-    }
-
-    return count;
-  }
-
-  getDuplicates(): Map<string, number[]> {
-    return this.duplicates;
   }
 }
 
@@ -197,7 +157,7 @@ export async function takeSnapshot(
   sessionId: string,
   _iframeSessionsMap: Map<string, string>,
   options: SnapshotOptions = {}
-): Promise<{ tree: string; refs: Record<string, { role: string; name: string; url?: string }> }> {
+): Promise<{ tree: string; refs: Record<string, { role: string; name: string }> }> {
   const interactive = options.interactive ?? false;
   const compact = options.compact ?? false;
   const includeUrls = options.urls ?? false;
@@ -269,7 +229,6 @@ export async function takeSnapshot(
   }
 
   // Track role:name for ref assignment
-  const roleNameTracker = new RoleNameTracker();
   const refMap = new RefMap();
   let nextRef = 1;
 
@@ -291,41 +250,12 @@ export async function takeSnapshot(
       continue;
     }
 
-    roleNameTracker.track(node.role, node.name, i);
     const refId = `e${nextRef++}`;
 
     node.hasRef = true;
     node.refId = refId;
 
-    refMap.add(refId, node.backendNodeId, node.role, node.name, node.url);
-  }
-
-  // Build dedup set for cursor-interactive elements
-  const dedupSet = new Set<string>();
-  for (const [, entry] of refMap.entriesSorted()) {
-    if (entry.name.length > 0) {
-      dedupSet.add(entry.name.toLowerCase());
-    }
-  }
-
-  // Filter cursor-interactive elements: deduplicate against ARIA tree names
-  for (const node of treeNodes) {
-    if (!node.cursorInfo) continue;
-    if (node.hasRef) continue; // Already has ref from ARIA tree
-
-    const text = node.cursorInfo.text.toLowerCase().trim();
-    if (text.length === 0 || dedupSet.has(text)) {
-      // Duplicate or empty, skip
-      continue;
-    }
-
-    // Assign ref for unique cursor-interactive element
-    const refId = `e${nextRef++}`;
-    node.hasRef = true;
-    node.refId = refId;
-
-    refMap.add(refId, node.backendNodeId, node.cursorInfo.kind, node.cursorInfo.text);
-    dedupSet.add(text);
+    refMap.add(refId, node.backendNodeId, node.role, node.name);
   }
 
   // Render tree
@@ -362,61 +292,94 @@ async function collectCursorInteractiveElements(
   sessionId: string,
   selectorBackendIds?: Set<number>
 ): Promise<Map<number, CursorElementInfo>> {
-  // JavaScript to scan all cursor-interactive elements
+  // Keep this aligned with Rust snapshot.rs find_cursor_interactive_elements.
   const scanJs = `
 (function() {
-  const elements = [];
-  const all = document.querySelectorAll('*');
+  const results = [];
+  if (!document.body) return results;
+
+  const interactiveRoles = {
+    button: 1, link: 1, textbox: 1, checkbox: 1, radio: 1, combobox: 1, listbox: 1,
+    menuitem: 1, menuitemcheckbox: 1, menuitemradio: 1, option: 1, searchbox: 1,
+    slider: 1, spinbutton: 1, switch: 1, tab: 1, treeitem: 1,
+  };
+
+  const interactiveTags = {
+    a: 1, button: 1, input: 1, select: 1, textarea: 1, details: 1, summary: 1,
+  };
+
+  const all = document.body.querySelectorAll('*');
 
   for (let i = 0; i < all.length; i++) {
     const el = all[i];
-    const style = window.getComputedStyle(el);
+    if (el.closest && el.closest('[hidden], [aria-hidden="true"]')) continue;
+
+    const tagName = el.tagName.toLowerCase();
+    if (interactiveTags[tagName]) continue;
+
+    const role = el.getAttribute('role');
+    if (role && interactiveRoles[role.toLowerCase()]) continue;
+
+    const style = getComputedStyle(el);
 
     const hasCursorPointer = style.cursor === 'pointer';
     const hasOnClick = el.onclick !== null || el.hasAttribute('onclick');
-    const hasTabIndex = el.hasAttribute('tabindex');
-    const isEditable = el.isContentEditable || el.hasAttribute('contenteditable');
+    const tabIndex = el.getAttribute('tabindex');
+    const hasTabIndex = tabIndex !== null && tabIndex !== '-1';
+    const ce = el.getAttribute('contenteditable');
+    const isEditable = ce === '' || ce === 'true';
 
     if (!hasCursorPointer && !hasOnClick && !hasTabIndex && !isEditable) {
       continue;
     }
 
+    if (hasCursorPointer && !hasOnClick && !hasTabIndex && !isEditable) {
+      const parent = el.parentElement;
+      if (parent && getComputedStyle(parent).cursor === 'pointer') {
+        continue;
+      }
+    }
+
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      continue;
+    }
+
     // Mark with data attribute for backendNodeId resolution
-    el.setAttribute('data-__ab-ci', i);
+    el.setAttribute('data-__ab-ci', String(results.length));
 
     // Collect text content
-    let text = '';
-    if (el.childNodes.length === 0 || (el.childNodes.length === 1 && el.childNodes[0].nodeType === 3)) {
-      text = el.textContent?.trim() || '';
-    } else {
-      // Has children, use innerText for visible text only
-      text = el.innerText?.trim() || '';
-    }
+    const text = (el.textContent || '').trim().slice(0, 100);
 
     // Detect hidden input
     let hiddenInputType = null;
     let hiddenInputChecked = null;
-
-    if (el.tagName === 'LABEL') {
-      const input = el.querySelector('input[type="radio"], input[type="checkbox"]');
-      if (input && window.getComputedStyle(input).display === 'none') {
-        hiddenInputType = input.getAttribute('type');
-        hiddenInputChecked = input.checked ? 'true' : 'false';
+    const input = el.querySelector('input[type="radio"], input[type="checkbox"]');
+    if (input) {
+      const inputStyle = getComputedStyle(input);
+      const isInputHidden =
+        inputStyle.display === 'none' ||
+        inputStyle.visibility === 'hidden' ||
+        input.hidden;
+      if (isInputHidden) {
+        hiddenInputType = input.type;
+        hiddenInputChecked = input.indeterminate ? 'mixed' : String(input.checked);
       }
     }
 
-    elements.push({
+    results.push({
       hasCursorPointer,
       hasOnClick,
       hasTabIndex,
       isEditable,
+      tagName,
       text,
       hiddenInputType,
       hiddenInputChecked,
     });
   }
 
-  return elements;
+  return results;
 })();
 `;
 
@@ -431,45 +394,63 @@ async function collectCursorInteractiveElements(
   );
 
   const elements = (evalResult as any).result?.value || [];
+  if (!Array.isArray(elements) || elements.length === 0) {
+    return new Map<number, CursorElementInfo>();
+  }
 
-  // Resolve backendNodeIds via querySelectorAll
+  // Batch-resolve backendNodeIds like Rust: one querySelectorAll + describe each node.
   const idxToBackend = new Map<number, number>();
   const doc = await client.sendCommand('DOM.getDocument', { depth: 0 }, sessionId);
   const rootNodeId = (doc as any)?.root?.nodeId;
-
-  for (let i = 0; i < elements.length; i++) {
-    if (!rootNodeId) {
-      break;
-    }
+  if (rootNodeId) {
     try {
-      const result = await client.sendCommand(
-        'DOM.querySelector',
-        { nodeId: rootNodeId, selector: `[data-__ab-ci="${i}"]` },
+      const queryResult = await client.sendCommand(
+        'DOM.querySelectorAll',
+        { nodeId: rootNodeId, selector: '[data-__ab-ci]' },
         sessionId
       );
-      const nodeId = (result as any).nodeId;
+      const nodeIds: number[] = Array.isArray((queryResult as any)?.nodeIds)
+        ? (queryResult as any).nodeIds
+        : [];
 
-      if (nodeId) {
-        const describe = await client.sendCommand('DOM.describeNode', { nodeId }, sessionId);
-        const backendNodeId = (describe as any)?.node?.backendNodeId;
-        if (backendNodeId) {
-          idxToBackend.set(i, backendNodeId);
+      const described = await Promise.all(
+        nodeIds.map(async (nodeId) => {
+          try {
+            return await client.sendCommand('DOM.describeNode', { nodeId }, sessionId);
+          } catch {
+            return null;
+          }
+        })
+      );
+
+      for (const desc of described) {
+        const node = (desc as any)?.node;
+        const backendNodeId = node?.backendNodeId;
+        const attrs: unknown[] = Array.isArray(node?.attributes) ? node.attributes : [];
+        let ciIndex: number | null = null;
+
+        for (let i = 0; i < attrs.length; i++) {
+          if (attrs[i] === 'data-__ab-ci' && typeof attrs[i + 1] === 'string') {
+            const parsed = Number.parseInt(String(attrs[i + 1]), 10);
+            if (!Number.isNaN(parsed)) {
+              ciIndex = parsed;
+            }
+            break;
+          }
+        }
+
+        if (typeof backendNodeId === 'number' && ciIndex !== null) {
+          idxToBackend.set(ciIndex, backendNodeId);
         }
       }
     } catch {
-      // Failed to resolve this element, skip
+      // Best effort: keep going and return what we resolved.
     }
   }
 
   // Clean up data attributes
-  const cleanupJs = `
-(function() {
-  const marked = document.querySelectorAll('[data-__ab-ci]');
-  for (let i = 0; i < marked.length; i++) {
-    marked[i].removeAttribute('data-__ab-ci');
-  }
-})();
-`;
+  const cleanupJs =
+    "(function(){ var els = document.querySelectorAll('[data-__ab-ci]'); for (var i = 0; i < els.length; i++) els[i].removeAttribute('data-__ab-ci'); return els.length; })()";
 
   try {
     await client.sendCommand(

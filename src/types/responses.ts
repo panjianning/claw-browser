@@ -58,11 +58,11 @@ export interface AXNode {
 }
 
 export interface SnapshotResponse extends BaseResponse {
-  url: string;
-  title: string;
-  axTree: AXNode;
-  markdown?: string;
-  timestamp: number;
+  data: {
+    snapshot: string;
+    origin: string;
+    refs: Record<string, { role: string; name: string }>;
+  };
 }
 
 export interface ScreenshotResponse extends BaseResponse {
