@@ -121,10 +121,12 @@ export function cleanupStaleFiles(session: string): void {
   const pidPath = getPidPath(session);
   const versionPath = getVersionPath(session);
   const streamPath = path.join(getSocketDir(), `${session}.stream`);
+  const cdpPath = path.join(getSocketDir(), `${session}.cdp`);
 
   try { fs.unlinkSync(pidPath); } catch {}
   try { fs.unlinkSync(versionPath); } catch {}
   try { fs.unlinkSync(streamPath); } catch {}
+  try { fs.unlinkSync(cdpPath); } catch {}
 
   if (process.platform !== 'win32') {
     const socketPath = getSocketPath(session);

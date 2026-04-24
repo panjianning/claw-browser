@@ -18,6 +18,12 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
   }
 
   const sessionId = mgr.activeSessionId?.() || '';
+  const interactionSupport = await inspectInteractionSupport(mgr.client, sessionId);
+  if (!interactionSupport.supported) {
+    const reason = interactionSupport.reason || 'This page does not support DOM click interactions.';
+    return { id, success: false, error: reason };
+  }
+
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,
@@ -60,6 +66,15 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
     if (domClicked) {
       return { id, success: true, data: { clicked: selector } };
     }
+  }
+
+  const clickable = await inspectClickableObject(mgr.client, objectId, effectiveSessionId);
+  if (!clickable.ok) {
+    return {
+      id,
+      success: false,
+      error: clickable.reason || `Element '${selector}' is not a clickable DOM element`,
+    };
   }
 
   const point = await getElementCenter(mgr.client, objectId, effectiveSessionId);
@@ -716,6 +731,89 @@ async function tryDomClickOnAboutBlank(client: any, objectId: string, sessionId:
   } catch {
     return false;
   }
+}
+
+async function inspectInteractionSupport(
+  client: any,
+  sessionId: string
+): Promise<{ supported: boolean; reason?: string }> {
+  try {
+    const result = await client.sendCommand(
+      'Runtime.evaluate',
+      {
+        expression: `(() => {
+          const href = String(location?.href || '');
+          const contentType = String(document?.contentType || '');
+          if (!document || !document.documentElement) {
+            return { supported: false, reason: 'No active document in current tab' };
+          }
+          const blockedTypes = ['application/json', 'text/plain', 'application/xml', 'text/xml'];
+          if (blockedTypes.includes(contentType.toLowerCase())) {
+            return {
+              supported: false,
+              reason: \`Current page is \${contentType} (\${href}), not an interactive HTML page\`,
+            };
+          }
+          return { supported: true };
+        })()`,
+        returnByValue: true,
+      },
+      sessionId
+    );
+    const value = result?.result?.value;
+    if (value && typeof value.supported === 'boolean') {
+      return value;
+    }
+  } catch {
+    // If inspection fails, allow command to proceed and rely on normal CDP errors.
+  }
+  return { supported: true };
+}
+
+async function inspectClickableObject(
+  client: any,
+  objectId: string,
+  sessionId: string
+): Promise<{ ok: boolean; reason?: string }> {
+  try {
+    const result = await client.sendCommand(
+      'Runtime.callFunctionOn',
+      {
+        objectId,
+        functionDeclaration: `function() {
+          const isElement = this && this.nodeType === Node.ELEMENT_NODE;
+          if (!isElement) {
+            return { ok: false, reason: 'Target is not a DOM element' };
+          }
+          if (typeof this.getBoundingClientRect !== 'function') {
+            return { ok: false, reason: 'Target element has no layout box' };
+          }
+          if (!this.isConnected) {
+            return { ok: false, reason: 'Target element is detached from document' };
+          }
+          const r = this.getBoundingClientRect();
+          const finiteRect =
+            Number.isFinite(r.left) &&
+            Number.isFinite(r.top) &&
+            Number.isFinite(r.width) &&
+            Number.isFinite(r.height);
+          if (!finiteRect) {
+            return { ok: false, reason: 'Target element has invalid layout metrics' };
+          }
+          return { ok: true };
+        }`,
+        returnByValue: true,
+      },
+      sessionId
+    );
+    const value = result?.result?.value;
+    if (value && typeof value.ok === 'boolean') {
+      return value;
+    }
+  } catch (err: any) {
+    return { ok: false, reason: err?.message || 'Failed to inspect target element' };
+  }
+  return { ok: false, reason: 'Failed to inspect target element' };
 }
 
 async function resolveElementObjectId(

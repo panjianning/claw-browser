@@ -2,6 +2,9 @@ import type { DaemonState } from './state.js';
 import { BrowserManager } from '../cdp/browser.js';
 import crypto from 'crypto';
 import { bindRuntimeEventTrackers } from './advanced.js';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import { getSocketDir } from '../utils/socket-dir.js';
 
 /**
  * Browser lifecycle action handlers (launch, close)
@@ -152,6 +155,39 @@ function deriveExternalTargetKey(
   return null;
 }
 
+function getPersistedCdpTargetPath(sessionId: string): string {
+  return path.join(getSocketDir(), `${sessionId}.cdp`);
+}
+
+async function readPersistedCdpTarget(sessionId: string): Promise<string | null> {
+  try {
+    const raw = await fs.readFile(getPersistedCdpTargetPath(sessionId), 'utf-8');
+    const value = raw.trim();
+    return value.length > 0 ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+async function persistCdpTarget(sessionId: string, target: string): Promise<void> {
+  const value = target.trim();
+  if (!value) return;
+  try {
+    await fs.mkdir(getSocketDir(), { recursive: true });
+    await fs.writeFile(getPersistedCdpTargetPath(sessionId), value, 'utf-8');
+  } catch {
+    // Ignore persistence errors; this is best-effort metadata.
+  }
+}
+
+async function clearPersistedCdpTarget(sessionId: string): Promise<void> {
+  try {
+    await fs.unlink(getPersistedCdpTargetPath(sessionId));
+  } catch {
+    // Ignore if not present.
+  }
+}
+
 export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   const envCdp = process.env.CLAW_BROWSER_CDP?.trim();
@@ -229,6 +265,9 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();
     state.startDialogHandler();
+    if (requestedExternalTarget) {
+      await persistCdpTarget(state.sessionId, requestedExternalTarget);
+    }
     // TODO: state.updateStreamClient();
     return {
       id,
@@ -249,6 +288,9 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
     bindRuntimeEventTrackers(state);
     state.startFetchHandler();
     state.startDialogHandler();
+    if (requestedExternalTarget) {
+      await persistCdpTarget(state.sessionId, requestedExternalTarget);
+    }
     // TODO: state.updateStreamClient();
     return {
       id,
@@ -319,6 +361,7 @@ export async function handleLaunch(cmd: any, state: DaemonState): Promise<any> {
   // Launch the browser
   try {
     await finalizeManagedLaunch(state, launchOptions, newHash, hasProxyAuth);
+    await clearPersistedCdpTarget(state.sessionId);
 
     return {
       id,
@@ -425,14 +468,17 @@ export async function autoLaunch(state: DaemonState): Promise<{ warning?: string
     id: 'auto-launch',
   };
 
-  const envCdp = process.env.CLAW_BROWSER_CDP?.trim();
-  if (envCdp) {
-    const parsed = parseCdpTarget(envCdp);
+  const envCdp = process.env.CLAW_BROWSER_CDP?.trim() || null;
+  const persistedCdp = await readPersistedCdpTarget(state.sessionId);
+  const cdpTarget = envCdp || persistedCdp;
+  if (cdpTarget) {
+    const parsed = parseCdpTarget(cdpTarget);
     if (parsed.cdpPort) {
       launchCmd.cdpPort = parsed.cdpPort;
     } else if (parsed.cdpUrl) {
       launchCmd.cdpUrl = parsed.cdpUrl;
     }
+    launchCmd.cdpTargetRaw = cdpTarget;
   }
 
   const result = await handleLaunch(launchCmd, state);

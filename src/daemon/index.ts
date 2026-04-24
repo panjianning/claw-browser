@@ -124,11 +124,13 @@ export async function runDaemon(options: DaemonOptions): Promise<void> {
       const enginePath = path.join(socketDir, `${session}.engine`);
       const providerPath = path.join(socketDir, `${session}.provider`);
       const extensionsPath = path.join(socketDir, `${session}.extensions`);
+      const cdpPath = path.join(socketDir, `${session}.cdp`);
       await Promise.all([
         fs.unlink(streamPath).catch(() => {}),
         fs.unlink(enginePath).catch(() => {}),
         fs.unlink(providerPath).catch(() => {}),
         fs.unlink(extensionsPath).catch(() => {}),
+        fs.unlink(cdpPath).catch(() => {}),
       ]);
     } catch (e) {
       // Ignore cleanup errors
