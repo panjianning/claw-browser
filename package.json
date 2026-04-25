@@ -1,6 +1,6 @@
 {
   "name": "claw-browser",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "Fast browser automation CLI for AI agents (TypeScript port)",
   "type": "module",
   "bin": {
