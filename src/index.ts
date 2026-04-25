@@ -239,12 +239,11 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
       const tab = tabs[i] || {};
       const marker = tab.active ? '→' : ' ';
       const tabId = typeof tab.tabId === 'string' ? tab.tabId : (typeof tab.id === 'string' ? tab.id : '');
-      const shortId = typeof tab.shortId === 'string' && tab.shortId.length > 0 ? tab.shortId : `t${i + 1}`;
       const label = typeof tab.label === 'string' && tab.label.length > 0 ? tab.label : '';
       const title = typeof tab.title === 'string' && tab.title.length > 0 ? tab.title : 'Untitled';
       const url = typeof tab.url === 'string' ? tab.url : '';
       const labelPart = label ? ` [${label}]` : '';
-      console.log(`${marker} ${shortId}${labelPart} ${tabId} ${title} - ${url}`);
+      console.log(`${marker}${labelPart} ${tabId} ${title} - ${url}`);
     }
     return;
   }
@@ -257,7 +256,6 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
     action === 'window_new'
   ) {
     const tabId = typeof data.tabId === 'string' ? data.tabId : '';
-    const shortId = typeof data.shortId === 'string' ? data.shortId : '';
     const label = typeof data.label === 'string' ? data.label : '';
     const title = typeof data.title === 'string' ? data.title : '';
     const url = typeof data.url === 'string' ? data.url : '';
@@ -268,9 +266,7 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
       if (url) {
         console.log(`  ${url}`);
       }
-      if (shortId) {
-        console.log(`  short: ${shortId}${label ? ` (${label})` : ''}`);
-      } else if (label) {
+      if (label) {
         console.log(`  label: ${label}`);
       }
       if (tabId) {
@@ -705,7 +701,7 @@ async function main() {
       } else {
         console.error(e instanceof Error ? e.message : String(e));
       }
-      process.exit(1);
+      process.exitCode=1;return;
     }
   }
 
@@ -728,7 +724,7 @@ async function main() {
       } else {
         console.error('Missing CDP endpoint. Usage: claw-browser connect <port|url> [session]');
       }
-      process.exit(1);
+      process.exitCode=1;return;
     }
 
     if (!isValidSessionName(session)) {
@@ -740,7 +736,7 @@ async function main() {
       } else {
         console.error(`Invalid session name: ${session}`);
       }
-      process.exit(1);
+      process.exitCode=1;return;
     }
 
     try {
@@ -804,7 +800,7 @@ async function main() {
       } else {
         console.error(`Failed to connect: ${e instanceof Error ? e.message : String(e)}`);
       }
-      process.exit(1);
+      process.exitCode=1;return;
     }
     return;
   }
@@ -867,7 +863,7 @@ async function main() {
         } else {
           console.error(`Invalid session name: ${session}`);
         }
-        process.exit(1);
+        process.exitCode=1;return;
       }
 
       try {
@@ -905,7 +901,7 @@ async function main() {
         } else {
           console.error(`Failed to start session: ${e instanceof Error ? e.message : String(e)}`);
         }
-        process.exit(1);
+        process.exitCode=1;return;
       }
       return;
     }
@@ -921,7 +917,7 @@ async function main() {
         } else {
           console.error(`Invalid session name: ${session}`);
         }
-        process.exit(1);
+        process.exitCode=1;return;
       }
 
       try {
@@ -938,7 +934,7 @@ async function main() {
         } else {
           console.error(`Failed to stop session: ${e instanceof Error ? e.message : String(e)}`);
         }
-        process.exit(1);
+        process.exitCode=1;return;
       }
       return;
     }
@@ -971,7 +967,7 @@ async function main() {
         } else {
           console.error(`Failed to stop sessions: ${e instanceof Error ? e.message : String(e)}`);
         }
-        process.exit(1);
+        process.exitCode=1;return;
       }
       return;
     }
@@ -981,14 +977,14 @@ async function main() {
       } else {
         console.error('Missing session subcommand. Use: session <start|stop|stop-all|list>');
       }
-      process.exit(1);
+      process.exitCode=1;return;
     }
     if (jsonMode) {
       printJsonError('Unknown session subcommand. Use: session <start|stop|stop-all|list>');
     } else {
       console.error('Unknown session subcommand. Use: session <start|stop|stop-all|list>');
     }
-    process.exit(1);
+    process.exitCode=1;return;
   }
 
   if (cleanedArgs[0] === 'profiles') {
@@ -1057,7 +1053,7 @@ async function main() {
         printHumanSuccess(command, response);
       } else {
         console.error(`Error: ${response.error || 'Unknown error'}`);
-        process.exit(1);
+        process.exitCode=1;return;
       }
     }
   } catch (e) {
@@ -1067,7 +1063,7 @@ async function main() {
       } else {
         console.error(e.message);
       }
-      process.exit(1);
+      process.exitCode=1;return;
     }
 
     if (jsonMode) {
@@ -1075,7 +1071,7 @@ async function main() {
     } else {
       console.error(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
-    process.exit(1);
+    process.exitCode=1;return;
   }
 }
 

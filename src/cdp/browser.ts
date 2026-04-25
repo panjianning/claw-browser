@@ -651,7 +651,7 @@ export class BrowserManager {
     return this.pages.length;
   }
 
-  public tabList(): Array<{ id: string; tabId: string; title: string; url: string; active: boolean; index: number; shortId: string; label?: string }> {
+  public tabList(): Array<{ id: string; tabId: string; title: string; url: string; active: boolean; index: number; label?: string }> {
     return this.pages.map((p, index) => ({
       id: p.targetId,
       tabId: p.targetId,
@@ -659,7 +659,6 @@ export class BrowserManager {
       url: p.url,
       active: index === this.activePageIndex,
       index,
-      shortId: this.shortTabId(index),
       label: this.tabLabels.get(p.targetId),
     }));
   }
@@ -681,14 +680,6 @@ export class BrowserManager {
       throw new Error(`Tab not found: ${tabId}`);
     }
     this.activePageIndex = index;
-  }
-
-  public setActivePageByShortId(shortId: string): void {
-    const parsed = this.parseShortId(shortId);
-    if (parsed === null) {
-      throw new Error(`Invalid tab reference: ${shortId}`);
-    }
-    this.setActivePage(parsed);
   }
 
   public setActivePageByLabel(label: string): void {
@@ -800,22 +791,6 @@ export class BrowserManager {
     if (this.pages.length === 0) {
       this.activePageIndex = 0;
     }
-  }
-
-  public shortTabId(index: number): string {
-    return `t${index + 1}`;
-  }
-
-  public parseShortId(value: string): number | null {
-    const m = /^t([1-9]\d*)$/i.exec(value.trim());
-    if (!m) {
-      return null;
-    }
-    const idx = parseInt(m[1], 10) - 1;
-    if (Number.isNaN(idx) || idx < 0 || idx >= this.pages.length) {
-      return null;
-    }
-    return idx;
   }
 
   public setTabLabel(targetId: string, label: string | null): void {

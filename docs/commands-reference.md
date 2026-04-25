@@ -200,8 +200,8 @@ Current no-`--tab-id` exceptions:
 - `tabs` (alias)
 - `tab list`
 - `tab new [url] [--label <name>]`
-- `tab close [tN|label|tab-id]`
-- `tab switch <target>` (`target` = `tN` | tab label | tab-id)
+- `tab close [label|tab-id]`
+- `tab switch <target>` (`target` = tab label | tab-id)
 - `tab <target>` (direct switch; same target formats)
 - `window new [url] [--label <name>]`
 - `frame <selector>`

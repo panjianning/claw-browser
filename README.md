@@ -68,8 +68,8 @@ Tabs:
 ```bash
 claw-browser tab list
 claw-browser tab new [url]
-claw-browser tab <tN|label|tab-id>
-claw-browser tab close [tN|label|tab-id]
+claw-browser tab <label|tab-id>
+claw-browser tab close [label|tab-id]
 ```
 
 Most browser commands now require `--tab-id` (except tab-management commands like `tab new/list/switch/close`, plus `window new`).

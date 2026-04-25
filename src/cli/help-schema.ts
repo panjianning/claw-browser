@@ -167,12 +167,12 @@ export const HELP_CATALOG: Record<string, HelpTopic> = {
   },
   tab: {
     usage: 'claw-browser [global options] tab [list|new|close|switch|<target>] ...',
-    description: 'Target formats: tN | <label> | <tab-id>',
+    description: 'Target formats: <label> | <tab-id>',
     subcommands: {
       list: { usage: 'claw-browser [global options] tab list' },
       new: { usage: 'claw-browser [global options] tab new [--label <name>] [url]' },
       close: { usage: 'claw-browser [global options] tab close [<target>]' },
-      switch: { usage: 'claw-browser [global options] tab switch <target>', description: 'Target formats: tN | <label> | <tab-id>' },
+      switch: { usage: 'claw-browser [global options] tab switch <target>', description: 'Target formats: <label> | <tab-id>' },
     },
   },
   tabs: { usage: 'claw-browser [global options] tab [list|new|close|switch|<target>] ...', description: 'Alias of tab.' },
@@ -286,10 +286,10 @@ export const HELP_OVERVIEW_SECTIONS: HelpOverviewSection[] = [
   {
     title: 'Tabs',
     items: [
-      { command: 'tab', summary: 'List tabs (shows short id, tabId, and optional label)' },
+      { command: 'tab', summary: 'List tabs (shows tabId and optional label)' },
       { command: 'tab new [url]', summary: 'Open a new tab (optionally navigate)' },
       { command: 'tab new --label docs [url]', summary: 'Open a new tab with a label' },
-      { command: 'tab <target>', summary: 'Switch active tab (target: tN|label|tab-id)' },
+      { command: 'tab <target>', summary: 'Switch active tab (target: label|tab-id)' },
       { command: 'tab close [target]', summary: 'Close tab (default: active)' },
       { command: 'window new', summary: 'Open a new window' },
     ],
@@ -356,7 +356,7 @@ export const HELP_EXAMPLES = {
     'claw-browser site xhs/note --note_id 123',
     'claw-browser tab list',
     'claw-browser tab new --label docs https://claw-browser.dev',
-    'claw-browser tab t2',
+    'claw-browser tab docs',
     'claw-browser tab close docs',
     'claw-browser window new',
     'claw-browser --tab-id <tab-id> eval "document.title"',

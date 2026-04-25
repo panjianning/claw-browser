@@ -160,9 +160,9 @@ claw-browser set useragent <ua>
 ```bash
 claw-browser tab list
 claw-browser tab new [--label <name>] [url]
-claw-browser tab <tN|label|tab-id>
-claw-browser tab switch <tN|label|tab-id>
-claw-browser tab close [<tN|label|tab-id>]
+claw-browser tab <label|tab-id>
+claw-browser tab switch <label|tab-id>
+claw-browser tab close [<label|tab-id>]
 claw-browser window new [--label <name>] [url]
 ```
 

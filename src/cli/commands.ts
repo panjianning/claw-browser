@@ -78,14 +78,11 @@ export function parseCommand(args: string[], flags: Flags = {}): Command {
   return result;
 }
 
-function parseTabSelector(value: string): { index?: number; tabId?: string; shortId?: string; label?: string } {
+function parseTabSelector(value: string): { index?: number; tabId?: string; label?: string } {
   const trimmed = value.trim();
   if (/^\d+$/.test(trimmed)) {
     const raw = parseInt(trimmed, 10);
     return { index: Math.max(0, raw - 1) };
-  }
-  if (/^t[1-9]\d*$/i.test(trimmed)) {
-    return { shortId: trimmed.toLowerCase() };
   }
   if (/^[a-f0-9]{16,}$/i.test(trimmed)) {
     return { tabId: trimmed };

@@ -1,14 +1,5 @@
 import type { DaemonState } from './state.js';
 
-function parseShortTabIndex(value: string): number | null {
-  const m = /^t([1-9]\d*)$/i.exec(value.trim());
-  if (!m) {
-    return null;
-  }
-  const idx = parseInt(m[1], 10) - 1;
-  return Number.isNaN(idx) || idx < 0 ? null : idx;
-}
-
 function resolveTabIdReference(browser: any, tabRef: string): string {
   const value = tabRef.trim();
   if (!value) {
@@ -19,15 +10,6 @@ function resolveTabIdReference(browser: any, tabRef: string): string {
   const exact = pages.find((p: any) => p?.targetId === value);
   if (exact?.targetId) {
     return exact.targetId;
-  }
-
-  const shortIndex = parseShortTabIndex(value);
-  if (shortIndex !== null) {
-    const byShort = pages[shortIndex];
-    if (byShort?.targetId) {
-      return byShort.targetId;
-    }
-    throw new Error(`Tab not found: ${value}`);
   }
 
   const byLabel = browser.findTargetIdByLabel?.(value);

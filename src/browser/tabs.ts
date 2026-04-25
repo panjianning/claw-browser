@@ -1,14 +1,11 @@
 import type { DaemonState } from './state.js';
 
-function parseTabTarget(cmd: any): { index?: number; tabId?: string; shortId?: string; label?: string } {
+function parseTabTarget(cmd: any): { index?: number; tabId?: string; label?: string } {
   if (typeof cmd.index === 'number' && !Number.isNaN(cmd.index)) {
     return { index: cmd.index };
   }
   if (typeof cmd.tabId === 'string' && cmd.tabId.trim().length > 0) {
     return { tabId: cmd.tabId.trim() };
-  }
-  if (typeof cmd.shortId === 'string' && cmd.shortId.trim().length > 0) {
-    return { shortId: cmd.shortId.trim() };
   }
   if (typeof cmd.label === 'string' && cmd.label.trim().length > 0) {
     return { label: cmd.label.trim() };
@@ -65,7 +62,6 @@ export async function handleTabNew(cmd: any, state: DaemonState): Promise<any> {
       created: true,
       tabId: active?.targetId || page.targetId,
       index: activeIndex,
-      shortId: activeIndex >= 0 ? mgr.shortTabId(activeIndex) : undefined,
       label: active ? mgr.tabList().find((t) => t.id === active.targetId)?.label : undefined,
       title: active?.title || '',
       url: active?.url || '',
@@ -84,14 +80,12 @@ export async function handleTabSwitch(cmd: any, state: DaemonState): Promise<any
   const target = parseTabTarget(cmd);
   if (target.tabId) {
     mgr.setActivePageByTargetId(target.tabId);
-  } else if (target.shortId) {
-    mgr.setActivePageByShortId(target.shortId);
   } else if (target.label) {
     mgr.setActivePageByLabel(target.label);
   } else if (typeof target.index === 'number') {
     mgr.setActivePage(target.index);
   } else {
-    return { id, success: false, error: 'Missing tab target. Use tab <tN|label|tab-id>' };
+    return { id, success: false, error: 'Missing tab target. Use tab <label|tab-id>' };
   }
 
   const active = mgr.getActivePage();
@@ -104,7 +98,6 @@ export async function handleTabSwitch(cmd: any, state: DaemonState): Promise<any
       switched: true,
       tabId: active?.targetId || '',
       index,
-      shortId: index >= 0 ? mgr.shortTabId(index) : undefined,
       label: active ? mgr.tabList().find((t) => t.id === active.targetId)?.label : undefined,
       title: active?.title || '',
       url: active?.url || '',
@@ -123,12 +116,6 @@ export async function handleTabClose(cmd: any, state: DaemonState): Promise<any>
   const target = parseTabTarget(cmd);
   if (target.tabId) {
     await mgr.closePage(target.tabId);
-  } else if (target.shortId) {
-    const idx = mgr.parseShortId(target.shortId);
-    if (idx === null) {
-      return { id, success: false, error: `Tab not found: ${target.shortId}` };
-    }
-    await mgr.closePageByIndex(idx);
   } else if (target.label) {
     const targetId = mgr.findTargetIdByLabel(target.label);
     if (!targetId) {
@@ -183,7 +170,6 @@ export async function handleWindowNew(cmd: any, state: DaemonState): Promise<any
       window: true,
       tabId: active?.targetId || page.targetId,
       index: activeIndex,
-      shortId: activeIndex >= 0 ? mgr.shortTabId(activeIndex) : undefined,
       label: active ? mgr.tabList().find((t) => t.id === active.targetId)?.label : undefined,
       title: active?.title || '',
       url: active?.url || '',

@@ -86,7 +86,7 @@ Session 隔离粒度包括：
 
 - `activePageIndex`
 - `tab label` 映射
-- `tN` 短 ID 解析
+- tab label / tab-id 解析
 
 ## 3.2 Tab 命令行为
 
@@ -94,8 +94,8 @@ Session 隔离粒度包括：
 
 - `tab list`
 - `tab new [url]`
-- `tab <target>` (`target` = `tN` | tab label | tab-id)
-- `tab close [tN|label|tab-id]`
+- `tab <target>` (`target` = tab label | tab-id)
+- `tab close [label|tab-id]`
 - `window new [url]`
 
 默认多数页面命令作用于 active tab。
