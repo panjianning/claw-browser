@@ -42,6 +42,7 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
     for (const [refId, ref] of Object.entries(tree.refs || {})) {
       const role = typeof ref.role === 'string' ? ref.role : '';
       const name = typeof ref.name === 'string' ? ref.name : '';
+      const backendNodeId = typeof (ref as any).backendNodeId === 'number' ? (ref as any).backendNodeId : undefined;
       const key = `${role}\u0000${name}`;
       const nth = roleNameSeen.get(key) || 0;
       roleNameSeen.set(key, nth + 1);
@@ -49,6 +50,7 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
         role,
         name,
         nth,
+        backendNodeId,
         frameId: state.activeFrameId || null,
       };
       state.refMap.set(refId, entry);

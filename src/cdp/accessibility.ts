@@ -136,12 +136,13 @@ class RefMap {
     });
   }
 
-  toObject(): Record<string, { role: string; name: string }> {
-    const result: Record<string, { role: string; name: string }> = {};
+  toObject(): Record<string, { role: string; name: string; backendNodeId?: number }> {
+    const result: Record<string, { role: string; name: string; backendNodeId?: number }> = {};
     for (const [refId, entry] of this.entriesSorted()) {
       result[refId] = {
         role: entry.role,
         name: entry.name,
+        backendNodeId: entry.backendNodeId,
       };
     }
     return result;
@@ -157,7 +158,7 @@ export async function takeSnapshot(
   sessionId: string,
   _iframeSessionsMap: Map<string, string>,
   options: SnapshotOptions = {}
-): Promise<{ tree: string; refs: Record<string, { role: string; name: string }> }> {
+): Promise<{ tree: string; refs: Record<string, { role: string; name: string; backendNodeId?: number }> }> {
   const interactive = options.interactive ?? false;
   const compact = options.compact ?? false;
   const includeUrls = options.urls ?? false;

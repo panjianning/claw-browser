@@ -5,6 +5,22 @@ type ResolvedElement = {
   effectiveSessionId: string;
 };
 
+function mouseButtonMask(button: string): number {
+  switch (button) {
+    case 'right':
+      return 2;
+    case 'middle':
+      return 4;
+    case 'back':
+      return 8;
+    case 'forward':
+      return 16;
+    case 'left':
+    default:
+      return 1;
+  }
+}
+
 export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   const selector = cmd.selector;
@@ -60,6 +76,7 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
 
   const button = cmd.button || 'left';
   const clickCount = cmd.clickCount || 1;
+  const buttons = mouseButtonMask(button);
 
   if (button === 'left' && clickCount === 1) {
     const domClicked = await tryDomClickOnAboutBlank(mgr.client, objectId, effectiveSessionId);
@@ -81,17 +98,17 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
 
   await mgr.client.sendCommand(
     'Input.dispatchMouseEvent',
-    { type: 'mouseMoved', x: point.x, y: point.y },
+    { type: 'mouseMoved', x: point.x, y: point.y, buttons: 0 },
     effectiveSessionId
   );
   await mgr.client.sendCommand(
     'Input.dispatchMouseEvent',
-    { type: 'mousePressed', x: point.x, y: point.y, button, clickCount },
+    { type: 'mousePressed', x: point.x, y: point.y, button, buttons, clickCount },
     effectiveSessionId
   );
   await mgr.client.sendCommand(
     'Input.dispatchMouseEvent',
-    { type: 'mouseReleased', x: point.x, y: point.y, button, clickCount },
+    { type: 'mouseReleased', x: point.x, y: point.y, button, buttons: 0, clickCount },
     effectiveSessionId
   );
 
@@ -444,10 +461,10 @@ export async function handleDrag(cmd: any, state: DaemonState): Promise<any> {
   const dst = await resolveElementObjectId(mgr.client, sessionId, state.refMap, String(target), state.iframeSessions);
   const srcPt = await getElementCenter(mgr.client, src.objectId, src.effectiveSessionId);
   const dstPt = await getElementCenter(mgr.client, dst.objectId, dst.effectiveSessionId);
-  await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: srcPt.x, y: srcPt.y, button: 'left' }, src.effectiveSessionId);
-  await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: srcPt.x, y: srcPt.y, button: 'left', clickCount: 1 }, src.effectiveSessionId);
-  await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: dstPt.x, y: dstPt.y, button: 'left' }, dst.effectiveSessionId);
-  await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: dstPt.x, y: dstPt.y, button: 'left', clickCount: 1 }, dst.effectiveSessionId);
+  await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: srcPt.x, y: srcPt.y, button: 'left', buttons: 0 }, src.effectiveSessionId);
+  await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: srcPt.x, y: srcPt.y, button: 'left', buttons: 1, clickCount: 1 }, src.effectiveSessionId);
+  await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x: dstPt.x, y: dstPt.y, button: 'left', buttons: 1 }, dst.effectiveSessionId);
+  await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: dstPt.x, y: dstPt.y, button: 'left', buttons: 0, clickCount: 1 }, dst.effectiveSessionId);
   return { id, success: true, data: { dragged: true } };
 }
 
@@ -478,20 +495,22 @@ export async function handleMouse(cmd: any, state: DaemonState): Promise<any> {
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
   const sessionId = mgr.activeSessionId?.() || '';
   const event = cmd.event;
+  const button = cmd.button || 'left';
+  const buttons = mouseButtonMask(button);
   if (event === 'move') {
     const x = Number(cmd.x);
     const y = Number(cmd.y);
     state.mouseState.x = x;
     state.mouseState.y = y;
-    await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y }, sessionId);
+    await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseMoved', x, y, buttons: 0 }, sessionId);
     return { id, success: true, data: { moved: true } };
   }
   if (event === 'down') {
-    await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: state.mouseState.x, y: state.mouseState.y, button: cmd.button || 'left', clickCount: 1 }, sessionId);
+    await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mousePressed', x: state.mouseState.x, y: state.mouseState.y, button, buttons, clickCount: 1 }, sessionId);
     return { id, success: true, data: { down: true } };
   }
   if (event === 'up') {
-    await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: state.mouseState.x, y: state.mouseState.y, button: cmd.button || 'left', clickCount: 1 }, sessionId);
+    await mgr.client.sendCommand('Input.dispatchMouseEvent', { type: 'mouseReleased', x: state.mouseState.x, y: state.mouseState.y, button, buttons: 0, clickCount: 1 }, sessionId);
     return { id, success: true, data: { up: true } };
   }
   if (event === 'wheel') {
@@ -687,8 +706,53 @@ async function getElementCenter(client: any, objectId: string, sessionId: string
     {
       objectId,
       functionDeclaration: `function() {
-        const r = this.getBoundingClientRect();
-        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        if (typeof this.scrollIntoView === 'function') {
+          this.scrollIntoView({ block: 'center', inline: 'center' });
+        }
+
+        const viewportW = window.innerWidth || document.documentElement.clientWidth || 0;
+        const viewportH = window.innerHeight || document.documentElement.clientHeight || 0;
+        const rects = Array.from(this.getClientRects ? this.getClientRects() : []);
+        const baseRect = this.getBoundingClientRect ? this.getBoundingClientRect() : null;
+        if (baseRect && rects.length === 0) {
+          rects.push(baseRect);
+        }
+
+        const candidates = [];
+        for (const r of rects) {
+          if (!r || !Number.isFinite(r.left) || !Number.isFinite(r.top) || !Number.isFinite(r.width) || !Number.isFinite(r.height)) {
+            continue;
+          }
+          if (r.width <= 0 || r.height <= 0) {
+            continue;
+          }
+          const cx = r.left + r.width / 2;
+          const cy = r.top + r.height / 2;
+          const insetX = Math.max(1, Math.min(4, r.width / 4));
+          const insetY = Math.max(1, Math.min(4, r.height / 4));
+          candidates.push(
+            { x: cx, y: cy },
+            { x: r.left + insetX, y: r.top + insetY },
+            { x: r.right - insetX, y: r.top + insetY },
+            { x: r.left + insetX, y: r.bottom - insetY },
+            { x: r.right - insetX, y: r.bottom - insetY }
+          );
+        }
+
+        const isInViewport = (x, y) => x >= 0 && y >= 0 && x <= viewportW && y <= viewportH;
+        for (const pt of candidates) {
+          if (!isInViewport(pt.x, pt.y)) continue;
+          const hit = document.elementFromPoint(pt.x, pt.y);
+          if (!hit) continue;
+          if (hit === this || (this.contains && this.contains(hit)) || (hit.contains && hit.contains(this))) {
+            return { x: pt.x, y: pt.y };
+          }
+        }
+
+        if (baseRect && Number.isFinite(baseRect.left) && Number.isFinite(baseRect.top)) {
+          return { x: baseRect.left + baseRect.width / 2, y: baseRect.top + baseRect.height / 2 };
+        }
+        return { x: 0, y: 0 };
       }`,
       returnByValue: true,
     },
@@ -830,17 +894,39 @@ async function resolveElementObjectId(
       throw new Error(`Element not found: ${selector}`);
     }
     const effectiveSessionId = resolveFrameSession(entry?.frameId, sessionId, iframeSessions);
-    const backendNodeId = typeof entry === 'number'
-      ? entry
-      : typeof entry?.backendNodeId === 'number'
-        ? entry.backendNodeId
-        : await findNodeIdByRoleName(client, effectiveSessionId, entry?.role || '', entry?.name || '', entry?.nth || 0);
-    const resolved = await client.sendCommand('DOM.resolveNode', { backendNodeId }, effectiveSessionId);
-    const objectId = resolved?.object?.objectId;
-    if (!objectId) {
+    const resolveNode = async (backendNodeId: number): Promise<string | null> => {
+      const resolved = await client.sendCommand('DOM.resolveNode', { backendNodeId }, effectiveSessionId);
+      return resolved?.object?.objectId || null;
+    };
+
+    if (typeof entry === 'number') {
+      const objectId = await resolveNode(entry);
+      if (!objectId) {
+        throw new Error(`Element not found: ${selector}`);
+      }
+      return { objectId, effectiveSessionId };
+    }
+
+    if (typeof entry?.backendNodeId === 'number') {
+      const cachedObjectId = await resolveNode(entry.backendNodeId);
+      if (cachedObjectId) {
+        return { objectId: cachedObjectId, effectiveSessionId };
+      }
+      // Cached backend node id can become stale after DOM updates.
+    }
+
+    const freshNodeId = await findNodeIdByRoleName(
+      client,
+      effectiveSessionId,
+      entry?.role || '',
+      entry?.name || '',
+      entry?.nth || 0
+    );
+    const freshObjectId = await resolveNode(freshNodeId);
+    if (!freshObjectId) {
       throw new Error(`Element not found: ${selector}`);
     }
-    return { objectId, effectiveSessionId };
+    return { objectId: freshObjectId, effectiveSessionId };
   }
 
   const expr = buildFindElementJs(selector);
