@@ -212,6 +212,8 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
   const action = command.action || '';
   const data = response.data || {};
 
+  const displayTabId = (tabId: string): string => tabId.slice(0, 6);
+
   if (action === 'navigate') {
     const title = typeof data.title === 'string' ? data.title.trim() : '';
     const url = typeof data.url === 'string' ? data.url : '';
@@ -220,14 +222,14 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
       console.log(`✓ ${title}`);
       console.log(`  ${url}`);
       if (tabId) {
-        console.log(`  tab: ${tabId}`);
+        console.log(`  tab: ${displayTabId(tabId)}`);
       }
       return;
     }
     if (url.length > 0) {
       console.log(url);
       if (tabId) {
-        console.log(`tab: ${tabId}`);
+        console.log(`tab: ${displayTabId(tabId)}`);
       }
       return;
     }
@@ -243,7 +245,7 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
       const title = typeof tab.title === 'string' && tab.title.length > 0 ? tab.title : 'Untitled';
       const url = typeof tab.url === 'string' ? tab.url : '';
       const labelPart = label ? ` [${label}]` : '';
-      console.log(`${marker}${labelPart} ${tabId} ${title} - ${url}`);
+      console.log(`${marker}${labelPart} ${displayTabId(tabId)} ${title} - ${url}`);
     }
     return;
   }
@@ -270,7 +272,7 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
         console.log(`  label: ${label}`);
       }
       if (tabId) {
-        console.log(`  tab: ${tabId}`);
+        console.log(`  tab: ${displayTabId(tabId)}`);
       }
       return;
     }
