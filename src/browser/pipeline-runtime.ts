@@ -895,7 +895,7 @@ export class PipelineRuntime {
     sourceRoot: string
   ): Promise<PipelineMeta | null> {
     try {
-      const imported = (await import(pathToFileURL(filePath).href)) as CodePipelineModule;
+      const imported = await this.importFreshModule<CodePipelineModule>(filePath);
       const rel = filePath
         .slice(sourceRoot.length)
         .replace(/^[/\\]/, '')
@@ -1006,7 +1006,7 @@ export class PipelineRuntime {
     const found = pipelines.find((item) => item.name === name && item.runtime !== 'site');
     if (!found) return null;
 
-    const imported = (await import(pathToFileURL(found.filePath).href)) as CodePipelineModule;
+    const imported = await this.importFreshModule<CodePipelineModule>(found.filePath);
     if (!imported || typeof imported.default !== 'function') {
       throw new Error(`pipeline "${name}" missing default export function`);
     }
@@ -1088,6 +1088,12 @@ export class PipelineRuntime {
     }
   }
 
+  private async importFreshModule<T>(filePath: string): Promise<T> {
+    const mtimeMs = statSync(filePath).mtimeMs;
+    const href = `${pathToFileURL(filePath).href}?v=${Math.floor(mtimeMs)}`;
+    return (await import(href)) as T;
+  }
+
   private makeRunId(): string {
     const time = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
     const rand = Math.random().toString(36).slice(2, 10);
@@ -1152,10 +1158,10 @@ export class PipelineRuntime {
     sourceRoot: string
   ): Promise<ModuleEntry | null> {
     try {
-      const imported = (await import(pathToFileURL(filePath).href)) as {
+      const imported = await this.importFreshModule<{
         default?: unknown;
         meta?: CodeModuleMeta;
-      };
+      }>(filePath);
       if (typeof imported.default !== 'function') return null;
       const rel = filePath
         .slice(sourceRoot.length)
@@ -1191,9 +1197,9 @@ export class PipelineRuntime {
       const candidatePath = isAbsolute(normalizedRef) ? normalizedRef : resolve(root, normalizedRef);
       if (!existsSync(candidatePath) || !statSync(candidatePath).isFile()) continue;
 
-      const imported = (await import(pathToFileURL(candidatePath).href)) as {
+      const imported = await this.importFreshModule<{
         default?: (input: Record<string, unknown>, context: PipelineModuleContext) => Promise<Record<string, unknown>>;
-      };
+      }>(candidatePath);
 
       if (!imported || typeof imported.default !== 'function') {
         throw new Error(`module "${moduleRef}" missing default export function`);
