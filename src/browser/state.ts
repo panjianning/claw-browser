@@ -228,6 +228,10 @@ export class DaemonState extends EventEmitter {
   streamClient: any | null = null;
   streamServer: any | null = null;
 
+  // Site/pipeline runtimes
+  siteRuntime: any | null = null;
+  pipelineRuntime: any | null = null;
+
   // Browser engine name
   engine: string;
 

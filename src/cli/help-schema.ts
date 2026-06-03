@@ -215,6 +215,7 @@ export const HELP_CATALOG: Record<string, HelpTopic> = {
     },
   },
   site: { usage: 'claw-browser [global options] site <list|search|info|update|<adapter>> [args...]' },
+  pipeline: { usage: 'claw-browser [global options] pipeline <list|info|run|status|logs|cancel|runs|rerun|modules|module-info> ...' },
   session: {
     usage: 'claw-browser session <start|stop|stop-all|list> [session]',
     description: 'Manage daemon sessions.',
@@ -279,6 +280,7 @@ export const HELP_OVERVIEW_SECTIONS: HelpOverviewSection[] = [
       { command: 'is <field> <selector>', summary: 'visible/enabled/checked' },
       { command: 'find <kind> <q> <action>', summary: 'Find then act (click/fill/type/gettext/count)' },
       { command: 'site <subcommand>', summary: 'Manage and run site adapters' },
+      { command: 'pipeline <subcommand>', summary: 'Run local pipelines and modules' },
       { command: 'console [--clear]', summary: 'Show console messages' },
       { command: 'errors [--clear]', summary: 'Show runtime errors' },
     ],

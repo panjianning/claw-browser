@@ -690,9 +690,8 @@ async function main() {
     return;
   }
 
-  // Keep site-specific help dispatch in runSiteCli so adapter help still works:
-  // claw-browser site <adapter> --help
-  if (cleanedArgs[0] !== 'site') {
+  // Keep site/pipeline-specific help dispatch in dedicated handlers so nested help still works.
+  if (cleanedArgs[0] !== 'site' && cleanedArgs[0] !== 'pipeline') {
     try {
       if (printCommandHelp(cleanedArgs)) {
         return;
@@ -1012,6 +1011,23 @@ async function main() {
     if (commandArgs[0] === 'site') {
       const { runSiteCli } = await import('./cli/site.js');
       await runSiteCli(commandArgs.slice(1), {
+        session,
+        jsonMode,
+        version: VERSION,
+        daemonOptions: {
+          headed: resolveDaemonHeaded(flags),
+          debug: false,
+          cdp: flags.cdp,
+          profile: flags.profile,
+        },
+        tabId: flags.tabId,
+      });
+      return;
+    }
+
+    if (commandArgs[0] === 'pipeline') {
+      const { runPipelineCli } = await import('./cli/pipeline.js');
+      await runPipelineCli(commandArgs.slice(1), {
         session,
         jsonMode,
         version: VERSION,

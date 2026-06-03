@@ -1,16 +1,4 @@
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
-import { spawnSync } from 'child_process';
-
-import { genId } from './commands.js';
 import * as connection from '../connection/index.js';
-
-const COMMUNITY_REPO = 'https://github.com/panjianning/claw-sites.git';
-const DEFAULT_SITE_DOMAIN_MAX_TABS = 2;
-const SITE_POOL_LOCK_TIMEOUT_MS = 60_000;
-const SITE_POOL_RETRY_MS = 120;
-const SITE_POOL_STALE_LOCK_MAX_AGE_MS = 5 * 60_000;
 
 interface ArgDef {
   required?: boolean;
@@ -23,10 +11,13 @@ interface SiteMeta {
   description: string;
   domain: string;
   args: Record<string, ArgDef>;
-  capabilities?: string[];
+  navigation?: {
+    required?: boolean;
+    sameDomain?: boolean;
+  };
   readOnly?: boolean;
   example?: string;
-  filePath: string;
+  filePath?: string;
   source: 'local' | 'community';
 }
 
@@ -38,181 +29,9 @@ export interface SiteCliOptions {
   tabId?: string;
 }
 
-interface DomainLease {
-  leaseId: string;
-  pid: number;
-  tabId: string;
-  createdTemp: boolean;
-  acquiredAt: number;
-}
-
-interface DomainPoolEntry {
-  queue: string[];
-  leases: DomainLease[];
-}
-
-interface DomainPoolState {
-  version: 1;
-  domains: Record<string, DomainPoolEntry>;
-}
-
-interface PoolLockOwner {
-  pid: number;
-  acquiredAt: number;
-}
-
-interface SiteTabLease {
-  managed: true;
-  session: string;
-  domain: string;
-  leaseId: string;
-  tabId: string;
-  createdTemp: boolean;
-}
-
-function getAgentBrowserDir(): string {
-  return path.join(os.homedir(), '.claw-browser');
-}
-
-function getLocalSitesDir(): string {
-  return path.join(getAgentBrowserDir(), 'sites');
-}
-
-function getCommunitySitesDir(): string {
-  return path.join(getAgentBrowserDir(), 'claw-sites');
-}
-
-function getSitePoolDir(): string {
-  return path.join(getAgentBrowserDir(), 'site-tab-pool');
-}
-
-function getSitePoolStatePath(session: string): string {
-  return path.join(getSitePoolDir(), `${session}.json`);
-}
-
-function getSitePoolLockPath(session: string): string {
-  return path.join(getSitePoolDir(), `${session}.lock`);
-}
-
-function getSitePoolLockOwnerPath(lockPath: string): string {
-  return path.join(lockPath, 'owner.json');
-}
-
-function normalizeSiteName(filePath: string, baseDir: string): string {
-  return path
-    .relative(baseDir, filePath)
-    .replace(/\\/g, '/')
-    .replace(/\.js$/i, '');
-}
-
-function parseSiteMeta(filePath: string, source: 'local' | 'community'): SiteMeta | null {
-  let content = '';
-  try {
-    content = fs.readFileSync(filePath, 'utf-8');
-  } catch {
-    return null;
-  }
-
-  const baseDir = source === 'local' ? getLocalSitesDir() : getCommunitySitesDir();
-  const defaultName = normalizeSiteName(filePath, baseDir);
-
-  const metaMatch = content.match(/\/\*\s*@meta\s*\n([\s\S]*?)\*\//);
-  if (metaMatch && metaMatch[1]) {
-    try {
-      const parsed = JSON.parse(metaMatch[1]) as Partial<SiteMeta>;
-      return {
-        name: parsed.name || defaultName,
-        description: parsed.description || '',
-        domain: parsed.domain || '',
-        args: parsed.args || {},
-        capabilities: parsed.capabilities,
-        readOnly: parsed.readOnly,
-        example: parsed.example,
-        filePath,
-        source,
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  const meta: SiteMeta = {
-    name: defaultName,
-    description: '',
-    domain: '',
-    args: {},
-    capabilities: undefined,
-    readOnly: undefined,
-    example: undefined,
-    filePath,
-    source,
-  };
-
-  const tagRegex = /^\s*\/\/\s*@(\w+)\s+(.+)$/;
-  for (const line of content.split('\n')) {
-    const m = line.match(tagRegex);
-    if (!m) continue;
-    const key = m[1];
-    const value = m[2].trim();
-    if (key === 'name') meta.name = value;
-    if (key === 'description') meta.description = value;
-    if (key === 'domain') meta.domain = value;
-    if (key === 'example') meta.example = value;
-    if (key === 'args') {
-      const argNames = value.split(/[,\s]+/).filter((x) => x.length > 0);
-      for (const argName of argNames) {
-        meta.args[argName] = { required: true, description: '' };
-      }
-    }
-  }
-
-  return meta;
-}
-
-function scanSites(dir: string, source: 'local' | 'community'): SiteMeta[] {
-  if (!fs.existsSync(dir)) return [];
-  const sites: SiteMeta[] = [];
-
-  const walk = (currentDir: string): void => {
-    let entries: fs.Dirent[] = [];
-    try {
-      entries = fs.readdirSync(currentDir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      const full = path.join(currentDir, entry.name);
-      if (entry.isDirectory()) {
-        if (entry.name.startsWith('.')) continue;
-        walk(full);
-        continue;
-      }
-      if (!entry.isFile() || !entry.name.endsWith('.js')) continue;
-      const meta = parseSiteMeta(full, source);
-      if (meta) {
-        sites.push(meta);
-      }
-    }
-  };
-
-  walk(dir);
-  return sites;
-}
-
-function getAllSites(): SiteMeta[] {
-  const community = scanSites(getCommunitySitesDir(), 'community');
-  const local = scanSites(getLocalSitesDir(), 'local');
-  const byName = new Map<string, SiteMeta>();
-
-  for (const site of community) {
-    byName.set(site.name, site);
-  }
-  for (const site of local) {
-    byName.set(site.name, site);
-  }
-
-  return Array.from(byName.values()).sort((a, b) => a.name.localeCompare(b.name));
+function genId(): string {
+  const timestamp = Date.now() * 1000 + performance.now() * 1000;
+  return `r${Math.floor(timestamp % 1000000)}`;
 }
 
 function printValue(jsonMode: boolean, value: unknown): void {
@@ -227,13 +46,46 @@ function printValue(jsonMode: boolean, value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
 
+function isHelpFlag(value: string | undefined): boolean {
+  return value === '--help' || value === '-h';
+}
+
+function formatArgDefault(value: unknown): string {
+  if (value === undefined) return '';
+  if (typeof value === 'string') return value;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatArgHelpLines(site: SiteMeta): string[] {
+  const argEntries = Object.entries(site.args || {});
+  const lines: string[] = [];
+
+  if (site.navigation?.required) {
+    lines.push('  entryUrl (required) - Entry URL for adapter navigation');
+  }
+
+  if (argEntries.length === 0 && lines.length === 0) {
+    return ['  (none)'];
+  }
+
+  for (const [argName, argDef] of argEntries) {
+    const required = argDef.required ? 'required' : 'optional';
+    const desc = argDef.description ? ` - ${argDef.description}` : '';
+    const defaultText =
+      argDef.default !== undefined ? ` (default: ${formatArgDefault(argDef.default)})` : '';
+    lines.push(`  ${argName} (${required})${defaultText}${desc}`);
+  }
+
+  return lines;
+}
+
 function formatSiteListHuman(sites: SiteMeta[]): string {
   if (sites.length === 0) {
-    return [
-      'No site adapters found.',
-      '  Install community adapters: claw-browser site update',
-      `  Local adapter directory: ${getLocalSitesDir()}`,
-    ].join('\n');
+    return 'No site adapters found.';
   }
 
   const groups = new Map<string, SiteMeta[]>();
@@ -244,7 +96,7 @@ function formatSiteListHuman(sites: SiteMeta[]): string {
     groups.set(platform, list);
   }
 
-  const platforms = Array.from(groups.keys()).sort((a, b) => a.localeCompare(b));
+  const platforms = [...groups.keys()].sort((a, b) => a.localeCompare(b));
   const lines: string[] = [];
   for (const platform of platforms) {
     lines.push('', `${platform}/`);
@@ -260,10 +112,6 @@ function formatSiteListHuman(sites: SiteMeta[]): string {
   }
   lines.push('');
   return lines.join('\n');
-}
-
-function isHelpFlag(value: string | undefined): boolean {
-  return value === '--help' || value === '-h';
 }
 
 function printSiteHelp(jsonMode: boolean): void {
@@ -320,33 +168,6 @@ function printSiteUpdateHelp(jsonMode: boolean): void {
   console.log('  --clone  Force git clone mode (requires community repo not cloned yet)');
 }
 
-function formatArgDefault(value: unknown): string {
-  if (value === undefined) return '';
-  if (typeof value === 'string') return value;
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return String(value);
-  }
-}
-
-function formatArgHelpLines(site: SiteMeta): string[] {
-  const argEntries = Object.entries(site.args);
-  if (argEntries.length === 0) {
-    return ['  (none)'];
-  }
-
-  const lines: string[] = [];
-  for (const [argName, argDef] of argEntries) {
-    const required = argDef.required ? 'required' : 'optional';
-    const desc = argDef.description ? ` - ${argDef.description}` : '';
-    const defaultText =
-      argDef.default !== undefined ? ` (default: ${formatArgDefault(argDef.default)})` : '';
-    lines.push(`  ${argName} (${required})${defaultText}${desc}`);
-  }
-  return lines;
-}
-
 function printSiteInfo(site: SiteMeta, jsonMode: boolean): void {
   if (jsonMode) {
     printValue(true, {
@@ -354,6 +175,7 @@ function printSiteInfo(site: SiteMeta, jsonMode: boolean): void {
       description: site.description,
       domain: site.domain,
       args: site.args,
+      navigation: site.navigation,
       example: site.example,
       readOnly: site.readOnly,
     });
@@ -371,571 +193,71 @@ function printSiteInfo(site: SiteMeta, jsonMode: boolean): void {
   console.log(`  ${site.example || `claw-browser site ${site.name}`}`);
   console.log('');
   console.log(`Domain: ${site.domain || '(not specified)'}`);
+  if (site.navigation) {
+    console.log(`Navigation: required=${site.navigation.required === true}, sameDomain=${site.navigation.sameDomain !== false}`);
+  }
   console.log(`Read-only: ${site.readOnly ? 'yes' : 'no'}`);
 }
 
-function parseAdapterArgs(site: SiteMeta, args: string[]): Record<string, string> {
-  const argMap: Record<string, string> = {};
-  const positional: string[] = [];
+function parseEntryUrl(adapterArgs: string[]): { argv: string[]; entryUrl?: string } {
+  const argv: string[] = [];
+  let entryUrl: string | undefined;
 
-  let i = 0;
-  while (i < args.length) {
-    const token = args[i];
-    if (token.startsWith('--')) {
-      const key = token.replace(/^--/, '');
-      if (Object.prototype.hasOwnProperty.call(site.args, key) && i + 1 < args.length) {
-        argMap[key] = args[i + 1];
-        i += 2;
-        continue;
+  for (let i = 0; i < adapterArgs.length; i++) {
+    const token = adapterArgs[i];
+    if (token === '--entryUrl' || token === '--entry-url') {
+      if (i + 1 >= adapterArgs.length) {
+        throw new Error('Missing value for --entryUrl');
       }
-    }
-    positional.push(token);
-    i += 1;
-  }
-
-  const argNames = Object.keys(site.args);
-  let posIdx = 0;
-  for (const argName of argNames) {
-    if (argMap[argName] === undefined && posIdx < positional.length) {
-      argMap[argName] = positional[posIdx];
-      posIdx += 1;
-    }
-  }
-
-  for (const [argName, argDef] of Object.entries(site.args)) {
-    if (argDef.required && argMap[argName] === undefined) {
-      const usageArgs = argNames
-        .map((name) => (site.args[name]?.required ? `<${name}>` : `[${name}]`))
-        .join(' ');
-      const argHelp = formatArgHelpLines(site).join('\n');
-      const example =
-        site.example && site.example.trim().length > 0
-          ? site.example.trim()
-          : `claw-browser site ${site.name} ${usageArgs}`.trim();
-      throw new Error(
-        `Missing required argument '${argName}'.\n` +
-          `Usage: claw-browser site ${site.name} ${usageArgs}\n` +
-          `Arguments:\n${argHelp}\n` +
-          `Example: ${example}\n` +
-          `Tip: claw-browser site info ${site.name}`
-      );
-    }
-  }
-
-  return argMap;
-}
-
-function normalizeDomain(domain: string): string {
-  return domain.trim().toLowerCase();
-}
-
-function domainMatches(host: string, domain: string): boolean {
-  const h = host.toLowerCase();
-  const d = normalizeDomain(domain);
-  return h === d || h.endsWith(`.${d}`);
-}
-
-function processAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) {
-    return false;
-  }
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function getMaxTabsPerDomain(): number {
-  const raw = process.env.CLAW_BROWSER_SITE_MAX_TABS_PER_DOMAIN;
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isInteger(parsed) && parsed > 0) {
-    return parsed;
-  }
-  return DEFAULT_SITE_DOMAIN_MAX_TABS;
-}
-
-function getStaleLockMaxAgeMs(): number {
-  const raw = process.env.CLAW_BROWSER_SITE_LOCK_STALE_MS;
-  const parsed = raw ? Number.parseInt(raw, 10) : NaN;
-  if (Number.isInteger(parsed) && parsed > 0) {
-    return parsed;
-  }
-  return SITE_POOL_STALE_LOCK_MAX_AGE_MS;
-}
-
-function ensurePoolDirs(): void {
-  fs.mkdirSync(getSitePoolDir(), { recursive: true });
-}
-
-function defaultPoolState(): DomainPoolState {
-  return { version: 1, domains: {} };
-}
-
-function loadPoolState(session: string): DomainPoolState {
-  const p = getSitePoolStatePath(session);
-  try {
-    const raw = fs.readFileSync(p, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<DomainPoolState>;
-    if (!parsed || typeof parsed !== 'object' || typeof parsed.domains !== 'object') {
-      return defaultPoolState();
-    }
-    return {
-      version: 1,
-      domains: parsed.domains || {},
-    };
-  } catch {
-    return defaultPoolState();
-  }
-}
-
-function savePoolState(session: string, state: DomainPoolState): void {
-  ensurePoolDirs();
-  const p = getSitePoolStatePath(session);
-  fs.writeFileSync(p, JSON.stringify(state), 'utf-8');
-}
-
-function cleanupPoolState(state: DomainPoolState): void {
-  for (const [domain, entry] of Object.entries(state.domains)) {
-    const aliveLeases = entry.leases.filter((lease) => processAlive(lease.pid));
-    const aliveLeaseIds = new Set(aliveLeases.map((lease) => lease.leaseId));
-    const dedupQueue: string[] = [];
-    for (const leaseId of entry.queue) {
-      if (aliveLeaseIds.has(leaseId) && !dedupQueue.includes(leaseId)) {
-        dedupQueue.push(leaseId);
-      }
-    }
-    entry.leases = aliveLeases;
-    entry.queue = dedupQueue;
-    if (entry.leases.length === 0 && entry.queue.length === 0) {
-      delete state.domains[domain];
-    }
-  }
-}
-
-async function withPoolLock<T>(session: string, fn: () => Promise<T>): Promise<T> {
-  ensurePoolDirs();
-  const lockPath = getSitePoolLockPath(session);
-  const ownerPath = getSitePoolLockOwnerPath(lockPath);
-  const startedAt = Date.now();
-  const staleLockMaxAgeMs = getStaleLockMaxAgeMs();
-
-  const writeLockOwner = (): void => {
-    const owner: PoolLockOwner = {
-      pid: process.pid,
-      acquiredAt: Date.now(),
-    };
-    fs.writeFileSync(ownerPath, JSON.stringify(owner), 'utf-8');
-  };
-
-  const lockOwnerPid = (): number | null => {
-    try {
-      const raw = fs.readFileSync(ownerPath, 'utf-8');
-      const parsed = JSON.parse(raw) as Partial<PoolLockOwner>;
-      if (typeof parsed?.pid === 'number' && Number.isInteger(parsed.pid) && parsed.pid > 0) {
-        return parsed.pid;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  };
-
-  const tryRecoverStaleLock = (): boolean => {
-    try {
-      const pid = lockOwnerPid();
-      if (pid !== null && !processAlive(pid)) {
-        fs.rmSync(lockPath, { recursive: true, force: true });
-        return true;
-      }
-
-      const stat = fs.statSync(lockPath);
-      const ageMs = Date.now() - stat.mtimeMs;
-      if (ageMs > staleLockMaxAgeMs) {
-        fs.rmSync(lockPath, { recursive: true, force: true });
-        return true;
-      }
-    } catch {
-      // Ignore recovery race/errors and continue waiting.
-    }
-    return false;
-  };
-
-  while (true) {
-    try {
-      fs.mkdirSync(lockPath);
-      writeLockOwner();
-      break;
-    } catch (error: any) {
-      if (error?.code !== 'EEXIST') {
-        throw error;
-      }
-      if (tryRecoverStaleLock()) {
-        continue;
-      }
-      if (Date.now() - startedAt > SITE_POOL_LOCK_TIMEOUT_MS) {
-        throw new Error(`Timed out waiting for site pool lock (${session})`);
-      }
-      await sleep(SITE_POOL_RETRY_MS);
-    }
-  }
-
-  try {
-    return await fn();
-  } finally {
-    try {
-      fs.rmSync(lockPath, { recursive: true, force: true });
-    } catch {
-      // Ignore lock cleanup errors.
-    }
-  }
-}
-
-function matchingDomainTabIds(
-  tabs: Array<Record<string, unknown>>,
-  domain: string
-): string[] {
-  const ids: string[] = [];
-  for (const tab of tabs) {
-    const tabUrl = typeof tab.url === 'string' ? tab.url : '';
-    const tabId = typeof tab.tabId === 'string' ? tab.tabId : '';
-    if (!tabUrl || !tabId) {
+      entryUrl = String(adapterArgs[i + 1] || '').trim();
+      i += 1;
       continue;
     }
-    try {
-      const host = new URL(tabUrl).hostname;
-      if (domainMatches(host, domain)) {
-        ids.push(tabId);
-      }
-    } catch {
-      // Ignore invalid tab URL.
-    }
+    argv.push(token);
   }
-  return ids;
+
+  return { argv, entryUrl };
 }
 
-async function listTabs(session: string): Promise<Array<Record<string, unknown>>> {
-  const listResp = await connection.sendCommand(
-    { id: genId(), action: 'tab_list' },
-    session
-  );
-  if (!listResp.success) {
-    throw new Error(listResp.error || 'Failed to list tabs');
-  }
-  return Array.isArray((listResp.data as any)?.tabs)
-    ? ((listResp.data as any).tabs as Array<Record<string, unknown>>)
-    : [];
-}
-
-async function acquireDomainTabLease(
-  session: string,
-  domainInput: string
-): Promise<SiteTabLease> {
-  const domain = normalizeDomain(domainInput);
-  const leaseId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-  const maxTabs = getMaxTabsPerDomain();
-
-  while (true) {
-    let acquired: SiteTabLease | null = null;
-
-    await withPoolLock(session, async () => {
-      const state = loadPoolState(session);
-      cleanupPoolState(state);
-
-      if (!state.domains[domain]) {
-        state.domains[domain] = { queue: [], leases: [] };
-      }
-      const entry = state.domains[domain];
-
-      if (!entry.queue.includes(leaseId)) {
-        entry.queue.push(leaseId);
-      }
-
-      if (entry.queue[0] !== leaseId) {
-        savePoolState(session, state);
-        return;
-      }
-
-      const tabs = await listTabs(session);
-      const busyTabIds = new Set(entry.leases.map((lease) => lease.tabId).filter((id) => id));
-      const reusable = matchingDomainTabIds(tabs, domain).find((tabId) => !busyTabIds.has(tabId));
-
-      if (reusable) {
-        entry.queue.shift();
-        const lease: DomainLease = {
-          leaseId,
-          pid: process.pid,
-          tabId: reusable,
-          createdTemp: false,
-          acquiredAt: Date.now(),
-        };
-        entry.leases.push(lease);
-        savePoolState(session, state);
-        acquired = {
-          managed: true,
-          session,
-          domain,
-          leaseId,
-          tabId: reusable,
-          createdTemp: false,
-        };
-        return;
-      }
-
-      if (entry.leases.length >= maxTabs) {
-        savePoolState(session, state);
-        return;
-      }
-
-      const newResp = await connection.sendCommand(
-        {
-          id: genId(),
-          action: 'tab_new',
-          url: `https://${domain}`,
-        },
-        session
-      );
-      if (!newResp.success) {
-        throw new Error(newResp.error || `Failed to open ${domain}`);
-      }
-
-      const tabId = typeof (newResp.data as any)?.tabId === 'string'
-        ? (newResp.data as any).tabId
-        : '';
-      if (!tabId) {
-        throw new Error(`Missing tabId after creating tab for ${domain}`);
-      }
-
-      entry.queue.shift();
-      const lease: DomainLease = {
-        leaseId,
-        pid: process.pid,
-        tabId,
-        createdTemp: true,
-        acquiredAt: Date.now(),
-      };
-      entry.leases.push(lease);
-      savePoolState(session, state);
-
-      acquired = {
-        managed: true,
-        session,
-        domain,
-        leaseId,
-        tabId,
-        createdTemp: true,
-      };
-    });
-
-    if (acquired) {
-      if (acquired.createdTemp) {
-        await sleep(3000);
-      }
-      return acquired;
-    }
-
-    await sleep(SITE_POOL_RETRY_MS);
-  }
-}
-
-async function releaseDomainTabLease(lease: SiteTabLease): Promise<void> {
-  await withPoolLock(lease.session, async () => {
-    const state = loadPoolState(lease.session);
-    cleanupPoolState(state);
-    const entry = state.domains[lease.domain];
-    if (!entry) {
-      return;
-    }
-
-    const index = entry.leases.findIndex((item) => item.leaseId === lease.leaseId);
-    if (index === -1) {
-      savePoolState(lease.session, state);
-      return;
-    }
-
-    const current = entry.leases[index];
-    if (current.createdTemp && current.tabId) {
-      await connection.sendCommand(
-        {
-          id: genId(),
-          action: 'tab_close',
-          tabId: current.tabId,
-        },
-        lease.session
-      ).catch(() => {});
-    }
-
-    entry.leases.splice(index, 1);
-    entry.queue = entry.queue.filter((id) => id !== lease.leaseId);
-
-    if (entry.leases.length === 0 && entry.queue.length === 0) {
-      delete state.domains[lease.domain];
-    }
-
-    savePoolState(lease.session, state);
-  });
-}
-
-function buildAdapterScript(filePath: string, argMap: Record<string, string>): string {
-  const jsContent = fs.readFileSync(filePath, 'utf-8');
-  const jsBody = jsContent.replace(/\/\*\s*@meta[\s\S]*?\*\//g, '').trim();
-  return `(${jsBody})(${JSON.stringify(argMap)})`;
-}
-
-function parseMaybeJson(value: unknown): unknown {
-  if (typeof value !== 'string') {
-    return value;
-  }
-  try {
-    return JSON.parse(value);
-  } catch {
-    return value;
-  }
-}
-
-function formatAdapterResultForHuman(value: unknown): string {
-  if (value === null || value === undefined) return '(no output)';
-  if (typeof value === 'string') return value;
-  return JSON.stringify(value, null, 2);
-}
-
-async function ensureDaemonForSiteRun(opts: SiteCliOptions): Promise<void> {
-  await connection.ensureDaemon(opts.session, opts.daemonOptions, opts.version);
-}
-
-async function runSiteAdapter(
-  site: SiteMeta,
-  args: string[],
+async function executeSiteAction(
+  siteAction: string,
+  args: Record<string, unknown>,
   opts: SiteCliOptions
-): Promise<void> {
-  await ensureDaemonForSiteRun(opts);
-  const argMap = parseAdapterArgs(site, args);
-  const script = buildAdapterScript(site.filePath, argMap);
+): Promise<unknown> {
+  const send = async (): Promise<connection.Response> => {
+    await connection.ensureDaemon(opts.session, opts.daemonOptions, opts.version);
+    return await connection.sendCommand(
+      {
+        id: genId(),
+        action: 'site',
+        siteAction,
+        args,
+        sessionId: opts.session,
+        workingDir: process.cwd(),
+      },
+      opts.session
+    );
+  };
 
-  let targetTabId: string | undefined = opts.tabId;
-  let managedLease: SiteTabLease | null = null;
+  let response = await send();
 
-  try {
-    if (!targetTabId && site.domain) {
-      managedLease = await acquireDomainTabLease(opts.session, site.domain);
-      targetTabId = managedLease.tabId;
-    }
-
-    const evalCmd: Record<string, unknown> = {
-      id: genId(),
-      action: 'evaluate',
-      script,
-    };
-    if (targetTabId) {
-      evalCmd.tabId = targetTabId;
-    }
-
-    const evalResp = await connection.sendCommand(evalCmd, opts.session);
-    if (!evalResp.success) {
-      throw new Error(evalResp.error || 'Eval failed');
-    }
-
-    const rawResult = (evalResp.data as any)?.result;
-    const parsed = parseMaybeJson(rawResult);
-
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      const obj = parsed as Record<string, unknown>;
-      if (typeof obj.error === 'string') {
-        const hint = typeof obj.hint === 'string' ? obj.hint : undefined;
-        throw new Error(hint ? `${obj.error}\nHint: ${hint}` : obj.error);
-      }
-    }
-
-    if (opts.jsonMode) {
-      printValue(true, { success: true, data: parsed ?? null });
-      return;
-    }
-
-    console.log(formatAdapterResultForHuman(parsed));
-  } finally {
-    if (managedLease) {
-      await releaseDomainTabLease(managedLease).catch(() => {});
-    }
-  }
-}
-
-function runSiteUpdate(args: string[], jsonMode: boolean): void {
-  if (args.some((arg) => isHelpFlag(arg))) {
-    printSiteUpdateHelp(jsonMode);
-    return;
+  // Backward compatibility: old daemon process may still be running after local rebuild.
+  if (!response.success && typeof response.error === 'string' && response.error.includes('Unknown action: site')) {
+    await connection.forceStopDaemon(opts.session);
+    response = await send();
   }
 
-  const forcePull = args.includes('--pull');
-  const forceClone = args.includes('--clone');
-  const unknownArgs = args.filter((arg) => arg !== '--pull' && arg !== '--clone');
-  if (unknownArgs.length > 0) {
-    throw new Error(`site update: unknown option(s): ${unknownArgs.join(', ')}`);
-  }
-  if (forcePull && forceClone) {
-    throw new Error('site update: --pull and --clone cannot be used together');
+  if (!response.success) {
+    throw new Error(response.error || `site ${siteAction} failed`);
   }
 
-  const agentBrowserDir = getAgentBrowserDir();
-  const communityDir = getCommunitySitesDir();
-
-  fs.mkdirSync(agentBrowserDir, { recursive: true });
-
-  const hasGit = fs.existsSync(path.join(communityDir, '.git'));
-  const updateMode = forcePull ? 'pull' : forceClone ? 'clone' : hasGit ? 'pull' : 'clone';
-
-  if (forcePull && !hasGit) {
-    throw new Error(`site update: cannot --pull because repo does not exist at ${communityDir}`);
-  }
-  if (forceClone && hasGit) {
-    throw new Error(`site update: cannot --clone because repo already exists at ${communityDir}`);
-  }
-
-  if (updateMode === 'pull') {
-    const res = spawnSync('git', ['pull', '--ff-only'], {
-      cwd: communityDir,
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    if (res.status !== 0) {
-      throw new Error(
-        `Update failed: ${(res.stderr || '').trim() || 'git pull failed'}`
-      );
-    }
-  } else {
-    const res = spawnSync('git', ['clone', COMMUNITY_REPO, communityDir], {
-      encoding: 'utf-8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
-    if (res.status !== 0) {
-      throw new Error(
-        `Clone failed: ${(res.stderr || '').trim() || 'git clone failed'}`
-      );
-    }
-  }
-
-  const siteCount = scanSites(communityDir, 'community').length;
-  if (jsonMode) {
-    printValue(true, {
-      success: true,
-      updateMode,
-      communityRepo: COMMUNITY_REPO,
-      communityDir,
-      siteCount,
-    });
-  } else {
-    console.log(`Installed ${siteCount} community adapters.`);
-  }
+  const payload = response.data as Record<string, unknown> | undefined;
+  return payload && Object.prototype.hasOwnProperty.call(payload, 'data') ? payload.data : payload;
 }
 
 export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<void> {
   const sub = args[0];
   const rest = args.slice(1);
-  const sites = getAllSites();
 
   if (sub === 'help' || isHelpFlag(sub)) {
     printSiteHelp(opts.jsonMode);
@@ -943,15 +265,10 @@ export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<
   }
 
   if (!sub || sub === 'list') {
+    const result = await executeSiteAction('list', {}, opts);
+    const sites = Array.isArray(result) ? (result as SiteMeta[]) : [];
     if (opts.jsonMode) {
-      const items = sites.map((site) => ({
-        name: site.name,
-        description: site.description,
-        domain: site.domain,
-        args: site.args,
-        source: site.source,
-      }));
-      printValue(true, items);
+      printValue(true, sites);
       return;
     }
     console.log(formatSiteListHuman(sites));
@@ -963,23 +280,11 @@ export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<
     if (!query) {
       throw new Error('Usage: claw-browser site search <query>');
     }
-    const matches = sites.filter((site) => {
-      return (
-        site.name.toLowerCase().includes(query) ||
-        site.description.toLowerCase().includes(query) ||
-        site.domain.toLowerCase().includes(query)
-      );
-    });
+    const result = await executeSiteAction('search', { query }, opts);
+    const matches = Array.isArray(result) ? (result as SiteMeta[]) : [];
+
     if (opts.jsonMode) {
-      printValue(
-        true,
-        matches.map((site) => ({
-          name: site.name,
-          description: site.description,
-          domain: site.domain,
-          source: site.source,
-        }))
-      );
+      printValue(true, matches);
       return;
     }
     if (matches.length === 0) {
@@ -988,7 +293,7 @@ export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<
     }
     for (const site of matches) {
       const suffix = site.source === 'local' ? ' (local)' : '';
-      console.log(`${site.name.padEnd(24, ' ')} ${site.description}${suffix}`);
+      console.log(`${site.name.padEnd(24, ' ')} ${site.description || ''}${suffix}`);
     }
     return;
   }
@@ -998,73 +303,99 @@ export async function runSiteCli(args: string[], opts: SiteCliOptions): Promise<
     if (!name) {
       throw new Error('Usage: claw-browser site info <name>');
     }
-    const site = sites.find((s) => s.name === name);
-    if (site) {
-      printSiteInfo(site, opts.jsonMode);
+
+    const result = await executeSiteAction('info', { name }, opts);
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      printValue(opts.jsonMode, result);
       return;
     }
 
-    const normalized = name.endsWith('/') ? name.slice(0, -1) : name;
-    const group = sites.filter((s) => s.name.startsWith(`${normalized}/`));
-    if (group.length > 0) {
+    const info = result as Record<string, unknown>;
+    if (info.platform && Array.isArray(info.adapters)) {
       if (opts.jsonMode) {
-        printValue(true, {
-          platform: normalized,
-          adapters: group.map((s) => ({
-            name: s.name,
-            description: s.description,
-            domain: s.domain,
-            source: s.source,
-          })),
-        });
+        printValue(true, info);
         return;
       }
-
-      console.log(`Adapters under "${normalized}/":`);
-      for (const s of group) {
-        const suffix = s.source === 'local' ? ' (local)' : '';
-        const desc = s.description ? ` - ${s.description}` : '';
-        console.log(`  ${s.name}${desc}${suffix}`);
+      const platform = String(info.platform || '');
+      const adapters = info.adapters as Array<Record<string, unknown>>;
+      console.log(`Adapters under "${platform}/":`);
+      for (const adapter of adapters) {
+        const desc = typeof adapter.description === 'string' && adapter.description ? ` - ${adapter.description}` : '';
+        console.log(`  ${String(adapter.name || '')}${desc}`);
       }
       console.log('');
-      console.log('Tip: use full adapter name for argument details, e.g.:');
-      console.log(`  claw-browser site info ${group[0].name}`);
+      if (adapters[0] && typeof adapters[0].name === 'string') {
+        console.log('Tip: use full adapter name for argument details, e.g.:');
+        console.log(`  claw-browser site info ${adapters[0].name}`);
+      }
       return;
     }
 
-    throw new Error(`site info: adapter "${name}" not found`);
+    printSiteInfo(info as unknown as SiteMeta, opts.jsonMode);
+    return;
   }
 
   if (sub === 'update') {
-    runSiteUpdate(rest, opts.jsonMode);
+    if (rest.some((item) => isHelpFlag(item))) {
+      printSiteUpdateHelp(opts.jsonMode);
+      return;
+    }
+
+    const forcePull = rest.includes('--pull');
+    const forceClone = rest.includes('--clone');
+    const unknownArgs = rest.filter((item) => item !== '--pull' && item !== '--clone');
+    if (unknownArgs.length > 0) {
+      throw new Error(`site update: unknown option(s): ${unknownArgs.join(', ')}`);
+    }
+    if (forcePull && forceClone) {
+      throw new Error('site update: --pull and --clone cannot be used together');
+    }
+
+    const mode = forcePull ? 'pull' : forceClone ? 'clone' : 'auto';
+    const result = await executeSiteAction('update', { mode }, opts);
+    printValue(opts.jsonMode, result);
     return;
   }
 
   const runAdapter = sub === 'run';
   const adapterName = runAdapter ? rest[0] : sub;
   const adapterArgs = runAdapter ? rest.slice(1) : rest;
+
   if (!adapterName) {
     throw new Error('Usage: claw-browser site run <name> [args...]');
   }
 
-  const site = sites.find((s) => s.name === adapterName);
-  if (!site) {
-    const suggestions = sites
-      .filter((s) => s.name.includes(adapterName))
-      .slice(0, 5)
-      .map((s) => s.name);
-    if (suggestions.length > 0) {
-      throw new Error(
-        `site "${adapterName}" not found.\nDid you mean:\n${suggestions.map((s) => `  claw-browser site ${s}`).join('\n')}`
-      );
+  if (adapterArgs.some((item) => isHelpFlag(item))) {
+    const info = await executeSiteAction('info', { name: adapterName }, opts);
+    if (info && typeof info === 'object' && !Array.isArray(info)) {
+      printSiteInfo(info as unknown as SiteMeta, opts.jsonMode);
+      return;
     }
-    throw new Error(`site "${adapterName}" not found. Try: claw-browser site list`);
-  }
-
-  if (adapterArgs.some((arg) => isHelpFlag(arg))) {
-    printSiteInfo(site, opts.jsonMode);
+    printValue(opts.jsonMode, info);
     return;
   }
 
-  await runSiteAdapter(site, adapterArgs, opts);
+  const parsed = parseEntryUrl(adapterArgs);
+  const result = await executeSiteAction(
+    'run',
+    {
+      name: adapterName,
+      argv: parsed.argv,
+      entryUrl: parsed.entryUrl,
+      ...(opts.tabId ? { tabId: opts.tabId } : {}),
+    },
+    opts
+  );
+
+  if (opts.jsonMode) {
+    printValue(true, { success: true, data: result });
+    return;
+  }
+
+  if (typeof result === 'string') {
+    console.log(result);
+    return;
+  }
+
+  printValue(false, result);
 }

@@ -152,6 +152,8 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     'stream_disable',
     'stream_status',
     'session_status',
+    'pipeline',
+    'site',
   ].includes(action);
 
   if (!skipLaunch) {
@@ -601,6 +603,213 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
     // Advanced actions
     case 'inspect':
       return advanced.handleInspect(cmd, state);
+    case 'pipeline': {
+      const { SiteRuntime } = await import('./site-runtime.js');
+      const { PipelineRuntime } = await import('./pipeline-runtime.js');
+
+      if (!state.siteRuntime) {
+        state.siteRuntime = new SiteRuntime(
+          {
+            listTabs: () => {
+              if (!state.browser || typeof state.browser.tabList !== 'function') {
+                return [];
+              }
+              const tabs = state.browser.tabList();
+              if (!Array.isArray(tabs)) return [];
+              return tabs.map((item: any) => ({
+                tabId: typeof item?.id === 'string' ? item.id : '',
+                title: typeof item?.title === 'string' ? item.title : '',
+                url: typeof item?.url === 'string' ? item.url : '',
+                active: item?.active === true,
+              }));
+            },
+            createTab: async (url: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              const page = await state.browser.createNewPage();
+              if (!page?.targetId || typeof page.targetId !== 'string') {
+                throw new Error('Failed to create tab');
+              }
+              state.browser.setActivePageByTargetId(page.targetId);
+              if (url && typeof url === 'string') {
+                await state.browser.navigate(url);
+              }
+              return page.targetId;
+            },
+            closeTab: async (tabId: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              await state.browser.closePage(tabId);
+            },
+            activateTab: async (tabId: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              state.browser.setActivePageByTargetId(tabId);
+            },
+            navigateTab: async (tabId: string, url: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              state.browser.setActivePageByTargetId(tabId);
+              await state.browser.navigate(url);
+            },
+            executeScriptInTab: async (tabId: string, script: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              const result = await routeAction('evaluate', { id, action: 'evaluate', tabId, script }, state);
+              if (!result?.success) {
+                throw new Error(result?.error || 'Failed to execute script in tab');
+              }
+              return result?.data?.result;
+            },
+          },
+          state.sessionId
+        );
+      }
+
+      if (!state.pipelineRuntime) {
+        state.pipelineRuntime = new PipelineRuntime({
+          executeSiteAction: async (input: any) => {
+            return await state.siteRuntime.execute(input);
+          },
+          executeBrowserAction: async (input: {
+            action: string;
+            tabId?: string;
+            workingDir?: string;
+            sessionId?: string;
+            params?: Record<string, unknown>;
+          }) => {
+            const browserCmd: Record<string, unknown> = {
+              id: `pipeline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+              action: input.action,
+              ...(input.tabId ? { tabId: input.tabId } : {}),
+            };
+            if (input.params && typeof input.params === 'object') {
+              for (const [key, value] of Object.entries(input.params)) {
+                browserCmd[key] = value;
+              }
+            }
+            const result = await routeAction(String(input.action || ''), browserCmd, state);
+            return {
+              success: result?.success === true,
+              action: String(input.action || ''),
+              tabId: typeof result?.data?.tabId === 'string' ? result.data.tabId : input.tabId,
+              data: result?.data,
+              error: typeof result?.error === 'string' ? result.error : undefined,
+            };
+          },
+        });
+      }
+
+      try {
+        const pipelineAction = String(cmd.pipelineAction || cmd.subaction || cmd.pipeline_action || '').trim();
+        if (!pipelineAction) {
+          return errorResponse(id, 'Missing pipelineAction');
+        }
+
+        if (pipelineAction === 'run' || pipelineAction === 'rerun') {
+          const needsLaunch = !state.browser || !(await state.browser.isConnectionAlive?.());
+          if (needsLaunch) {
+            const lifecycle = await import('./lifecycle.js');
+            await lifecycle.autoLaunch(state);
+          }
+        }
+
+        const result = await state.pipelineRuntime.execute({
+          action: pipelineAction,
+          args:
+            cmd.args && typeof cmd.args === 'object' && !Array.isArray(cmd.args)
+              ? (cmd.args as Record<string, unknown>)
+              : {},
+          workingDir: typeof cmd.workingDir === 'string' ? cmd.workingDir : process.cwd(),
+          sessionId: typeof cmd.sessionId === 'string' ? cmd.sessionId : state.sessionId,
+        });
+        return successResponse(id, result);
+      } catch (error: any) {
+        return errorResponse(id, error?.message || String(error));
+      }
+    }
+    case 'site': {
+      const { SiteRuntime } = await import('./site-runtime.js');
+
+      if (!state.siteRuntime) {
+        state.siteRuntime = new SiteRuntime(
+          {
+            listTabs: () => {
+              if (!state.browser || typeof state.browser.tabList !== 'function') {
+                return [];
+              }
+              const tabs = state.browser.tabList();
+              if (!Array.isArray(tabs)) return [];
+              return tabs.map((item: any) => ({
+                tabId: typeof item?.id === 'string' ? item.id : '',
+                title: typeof item?.title === 'string' ? item.title : '',
+                url: typeof item?.url === 'string' ? item.url : '',
+                active: item?.active === true,
+              }));
+            },
+            createTab: async (url: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              const page = await state.browser.createNewPage();
+              if (!page?.targetId || typeof page.targetId !== 'string') {
+                throw new Error('Failed to create tab');
+              }
+              state.browser.setActivePageByTargetId(page.targetId);
+              if (url && typeof url === 'string') {
+                await state.browser.navigate(url);
+              }
+              return page.targetId;
+            },
+            closeTab: async (tabId: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              await state.browser.closePage(tabId);
+            },
+            activateTab: async (tabId: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              state.browser.setActivePageByTargetId(tabId);
+            },
+            navigateTab: async (tabId: string, url: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              state.browser.setActivePageByTargetId(tabId);
+              await state.browser.navigate(url);
+            },
+            executeScriptInTab: async (tabId: string, script: string) => {
+              if (!state.browser) throw new Error('Browser not launched');
+              const result = await routeAction('evaluate', { id, action: 'evaluate', tabId, script }, state);
+              if (!result?.success) {
+                throw new Error(result?.error || 'Failed to execute script in tab');
+              }
+              return result?.data?.result;
+            },
+          },
+          state.sessionId
+        );
+      }
+
+      try {
+        const siteAction = String(cmd.siteAction || cmd.subaction || cmd.site_action || '').trim();
+        if (!siteAction) {
+          return errorResponse(id, 'Missing siteAction');
+        }
+
+        if (siteAction === 'run') {
+          const needsLaunch = !state.browser || !(await state.browser.isConnectionAlive?.());
+          if (needsLaunch) {
+            const lifecycle = await import('./lifecycle.js');
+            await lifecycle.autoLaunch(state);
+          }
+        }
+
+        const args =
+          cmd.args && typeof cmd.args === 'object' && !Array.isArray(cmd.args)
+            ? (cmd.args as Record<string, unknown>)
+            : {};
+
+        const result = await state.siteRuntime.execute({
+          action: siteAction,
+          ...args,
+          workingDir: typeof cmd.workingDir === 'string' ? cmd.workingDir : process.cwd(),
+          sessionId: typeof cmd.sessionId === 'string' ? cmd.sessionId : state.sessionId,
+        });
+        return successResponse(id, result);
+      } catch (error: any) {
+        return errorResponse(id, error?.message || String(error));
+      }
+    }
     case 'session_status':
       return advanced.handleSessionStatus(cmd, state);
     case 'selectall':
