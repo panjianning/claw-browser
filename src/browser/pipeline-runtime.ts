@@ -619,11 +619,16 @@ export class PipelineRuntime {
             if (!result.success) {
               throw new Error(result.error || `browser action failed: ${action}`);
             }
+            const normalizedAction = String(action || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
+            const normalizedData =
+              normalizedAction === 'tab_list' && result.data && typeof result.data === 'object' && !Array.isArray(result.data)
+                ? ((result.data as Record<string, unknown>).tabs ?? result.data)
+                : result.data;
             finishStep(step, 'completed', { summary: `ok: ${action}` });
             return {
               action,
               tabId: result.tabId,
-              data: result.data,
+              data: normalizedData,
             };
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

@@ -673,6 +673,15 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
             sessionId?: string;
             params?: Record<string, unknown>;
           }) => {
+            const forbidden = String(input.action || '').trim().toLowerCase();
+            if (forbidden === 'pipeline' || forbidden === 'site') {
+              return {
+                success: false,
+                action: String(input.action || ''),
+                error: `browser.run does not support nested action: ${forbidden}`,
+              };
+            }
+
             const browserCmd: Record<string, unknown> = {
               id: `pipeline-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
               action: input.action,
@@ -683,7 +692,9 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
                 browserCmd[key] = value;
               }
             }
-            const result = await routeAction(String(input.action || ''), browserCmd, state);
+            // Use executeCommand (not routeAction) so wait/tabId/session binding semantics
+            // are identical to normal CLI commands.
+            const result = await executeCommand(browserCmd, state);
             return {
               success: result?.success === true,
               action: String(input.action || ''),

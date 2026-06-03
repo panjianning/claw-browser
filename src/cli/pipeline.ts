@@ -45,6 +45,9 @@ function printPipelineHelp(jsonMode: boolean): void {
     '  claw-browser pipeline rerun <runId> [--wait] [--workdir <path>] [--full]',
     '  claw-browser pipeline modules [query]',
     '  claw-browser pipeline module-info <name>',
+    '',
+    'Input shortcuts:',
+    '  Any unknown --key value in `pipeline run` is treated as input field (for example: --keyword abc).',
   ];
 
   if (jsonMode) {
@@ -67,6 +70,57 @@ function parseStringFlag(args: string[], flag: string): string | undefined {
   const index = args.findIndex((item) => item === flag);
   if (index === -1 || index + 1 >= args.length) return undefined;
   return String(args[index + 1] || '').trim();
+}
+
+function parseCliInputValue(raw: string): unknown {
+  const value = String(raw || '').trim();
+  if (value.length === 0) return '';
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  if (value === 'null') return null;
+  if (/^-?\d+(?:\.\d+)?$/.test(value)) {
+    const num = Number(value);
+    if (Number.isFinite(num)) return num;
+  }
+  return value;
+}
+
+function parseShorthandInputArgs(args: string[]): Record<string, unknown> {
+  const knownValueFlags = new Set(['--workdir', '--input', '--input-file']);
+  const knownBooleanFlags = new Set(['--wait']);
+  const out: Record<string, unknown> = {};
+
+  for (let i = 0; i < args.length; i++) {
+    const token = args[i];
+    if (!token.startsWith('--')) continue;
+    if (knownBooleanFlags.has(token)) continue;
+
+    if (knownValueFlags.has(token)) {
+      i += 1;
+      continue;
+    }
+
+    const eqIdx = token.indexOf('=');
+    if (eqIdx > 2) {
+      const key = token.slice(2, eqIdx).trim();
+      const val = token.slice(eqIdx + 1);
+      if (key) out[key] = parseCliInputValue(val);
+      continue;
+    }
+
+    const key = token.slice(2).trim();
+    if (!key) continue;
+
+    const next = args[i + 1];
+    if (next !== undefined && !next.startsWith('--')) {
+      out[key] = parseCliInputValue(next);
+      i += 1;
+    } else {
+      out[key] = true;
+    }
+  }
+
+  return out;
 }
 
 function normalizeAction(value: string): string {
@@ -118,6 +172,37 @@ function readDataEnvelope(value: unknown): unknown {
     return record.data;
   }
   return value;
+}
+
+function keepOnlyFailedStepDetails(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const record = value as Record<string, unknown>;
+  const steps = Array.isArray(record.steps) ? (record.steps as Array<Record<string, unknown>>) : null;
+  const stepLogs = record.stepLogs && typeof record.stepLogs === 'object' && !Array.isArray(record.stepLogs)
+    ? (record.stepLogs as Record<string, unknown>)
+    : null;
+
+  if (!steps && !stepLogs) return value;
+
+  const failedSteps = (steps || []).filter((step) => {
+    return String(step?.status || '').trim().toLowerCase() === 'failed';
+  });
+  const failedIds = new Set(failedSteps.map((step) => String(step?.id || '')).filter((id) => id.length > 0));
+
+  const failedStepLogs: Record<string, unknown> = {};
+  if (stepLogs) {
+    for (const [key, val] of Object.entries(stepLogs)) {
+      if (failedIds.has(key)) {
+        failedStepLogs[key] = val;
+      }
+    }
+  }
+
+  return {
+    ...record,
+    steps: failedSteps,
+    stepLogs: failedStepLogs,
+  };
 }
 
 export async function runPipelineCli(args: string[], opts: PipelineCliOptions): Promise<void> {
@@ -193,16 +278,22 @@ export async function runPipelineCli(args: string[], opts: PipelineCliOptions): 
       input.tabId = opts.tabId;
     }
 
+    const shorthandInput = parseShorthandInputArgs(rest);
+
     const payload: Record<string, unknown> = {
       name,
-      input,
+      input: {
+        ...input,
+        ...shorthandInput,
+      },
       wait,
       detail: wait ? 'full' : 'compact',
     };
     if (workDir) payload.workDir = workDir;
 
     const result = await executePipelineAction('run', payload, opts);
-    printValue(opts.jsonMode, readDataEnvelope(result));
+    const output = wait ? keepOnlyFailedStepDetails(readDataEnvelope(result)) : readDataEnvelope(result);
+    printValue(opts.jsonMode, output);
     return;
   }
 
