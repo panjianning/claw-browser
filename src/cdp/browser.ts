@@ -833,7 +833,8 @@ export class BrowserManager {
     return null;
   }
 
-  public async syncTrackedTabs(): Promise<void> {
+  public async syncTrackedTabs(options?: { ensurePageIfEmpty?: boolean }): Promise<void> {
+    const ensurePageIfEmpty = options?.ensurePageIfEmpty !== false;
     const activeTargetId = this.getActivePage()?.targetId ?? null;
     const result = (await this.client.sendCommand('Target.getTargets', {})) as GetTargetsResult;
     const pageTargets = result.targetInfos.filter(shouldTrackTarget);
@@ -870,7 +871,9 @@ export class BrowserManager {
 
     if (this.pages.length === 0) {
       this.activePageIndex = 0;
-      await this.ensurePage();
+      if (ensurePageIfEmpty) {
+        await this.ensurePage();
+      }
       return;
     }
 

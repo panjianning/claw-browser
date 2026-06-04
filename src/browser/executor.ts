@@ -925,7 +925,10 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
           return successResponse(id, result);
         } finally {
           if (autoOwnerId) {
-            await state.tabOwnership.releaseOwner(autoOwnerId, { closeOwnedTabs: false }).catch(() => undefined);
+            await Promise.race([
+              state.tabOwnership.releaseOwner(autoOwnerId, { closeOwnedTabs: false }),
+              new Promise<void>((resolve) => setTimeout(resolve, 1000)),
+            ]).catch(() => undefined);
           }
         }
       } catch (error: any) {

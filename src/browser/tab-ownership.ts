@@ -82,7 +82,7 @@ export class TabOwnershipManager {
 
     if (typeof browser.syncTrackedTabs === 'function') {
       try {
-        await browser.syncTrackedTabs();
+        await browser.syncTrackedTabs({ ensurePageIfEmpty: false });
       } catch {
         // Ignore provider limitations (for example direct page session proxies).
       }

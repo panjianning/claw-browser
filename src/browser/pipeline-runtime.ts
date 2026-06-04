@@ -577,9 +577,21 @@ export class PipelineRuntime {
       }
     } finally {
       run.currentChild = null;
-      await this.context.releaseRunOwner(run.ownerId).catch(() => undefined);
+      await this.releaseOwnerBestEffort(run.ownerId);
       const statePath = join(workDir, 'run-state.json');
       writeFileSync(statePath, this.safeStringify(this.toRunStatus(run, 'full')), 'utf-8');
+    }
+  }
+
+  private async releaseOwnerBestEffort(ownerId: string): Promise<void> {
+    const RELEASE_TIMEOUT_MS = 1000;
+    try {
+      await Promise.race([
+        this.context.releaseRunOwner(ownerId),
+        new Promise<void>((resolve) => setTimeout(resolve, RELEASE_TIMEOUT_MS)),
+      ]);
+    } catch {
+      // Best effort cleanup should not block pipeline completion.
     }
   }
 

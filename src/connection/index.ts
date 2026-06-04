@@ -570,8 +570,10 @@ function isTransientError(error: string): boolean {
 
 async function sendCommandOnce(cmd: unknown, session: string): Promise<Response> {
   const socket = await connect(session);
-
-  socket.setTimeout(30000); // 30s read timeout
+  const timeoutMs = resolveRequestTimeoutMs(cmd);
+  if (typeof timeoutMs === 'number' && timeoutMs > 0) {
+    socket.setTimeout(timeoutMs);
+  }
 
   const jsonStr = JSON.stringify(cmd) + '\n';
   socket.write(jsonStr);
@@ -611,6 +613,31 @@ async function sendCommandOnce(cmd: unknown, session: string): Promise<Response>
       }
     });
   });
+}
+
+function resolveRequestTimeoutMs(cmd: unknown): number | undefined {
+  const envTimeout = Number(process.env.CLAW_BROWSER_REQUEST_TIMEOUT_MS || '');
+  if (Number.isFinite(envTimeout) && envTimeout > 0) {
+    return envTimeout;
+  }
+
+  const c = (cmd && typeof cmd === 'object') ? (cmd as Record<string, unknown>) : null;
+  const action = typeof c?.action === 'string' ? c.action : '';
+
+  if (action === 'pipeline') {
+    // Pipeline commands may stream large final payloads (full logs/steps).
+    // Avoid client-side 30s timeout for this action family.
+    return undefined;
+  }
+
+  if (action === 'site') {
+    const siteAction = typeof c?.siteAction === 'string' ? c.siteAction : '';
+    if (siteAction === 'run') {
+      return undefined;
+    }
+  }
+
+  return 30000;
 }
 
 export async function sendCommand(cmd: unknown, session: string): Promise<Response> {
