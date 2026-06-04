@@ -65,10 +65,14 @@ export async function handleTabList(cmd: any, state: DaemonState): Promise<any> 
     return { id, success: false, error: 'Browser not launched' };
   }
   await syncTabsIfSupported(mgr);
-  const tabs = mgr.tabList().map((tab: any) => ({
+  const ownerId = typeof cmd.ownerId === 'string' ? cmd.ownerId.trim() : '';
+  const allTabs = mgr.tabList().map((tab: any) => ({
     ...tab,
     ownerId: state.tabOwnership.ownerOf(String(tab.id || tab.tabId || '')),
   }));
+  const tabs = ownerId
+    ? allTabs.filter((tab: any) => String(tab.ownerId || '').trim() === ownerId)
+    : allTabs.filter((tab: any) => !String(tab.ownerId || '').trim());
   return { id, success: true, data: { tabs } };
 }
 
@@ -80,18 +84,21 @@ export async function handleTabNew(cmd: any, state: DaemonState): Promise<any> {
   }
 
   await syncTabsIfSupported(mgr);
+  const ownerId = typeof cmd.ownerId === 'string' ? cmd.ownerId.trim() : '';
   const page = await mgr.createNewPage();
-  mgr.setActivePageByTargetId(page.targetId);
+  if (ownerId) {
+    state.tabOwnership.bindTabToOwner(page.targetId, ownerId, { createdByOwner: true });
+  }
 
   if (typeof cmd.url === 'string' && cmd.url.trim().length > 0) {
-    await mgr.navigate(cmd.url);
+    await mgr.navigate(cmd.url, undefined, page.sessionId);
   }
   if (typeof cmd.label === 'string' && cmd.label.trim().length > 0) {
     mgr.setTabLabel(page.targetId, cmd.label);
   }
 
-  const active = mgr.getActivePage();
-  const activeIndex = mgr.getPages().findIndex((p: any) => p.targetId === (active?.targetId || page.targetId));
+  const active = mgr.getPages().find((p: any) => p.targetId === page.targetId);
+  const activeIndex = mgr.getPages().findIndex((p: any) => p.targetId === page.targetId);
   return {
     id,
     success: true,
@@ -114,13 +121,29 @@ export async function handleTabSwitch(cmd: any, state: DaemonState): Promise<any
   }
 
   await syncTabsIfSupported(mgr);
+  const ownerId = typeof cmd.ownerId === 'string' ? cmd.ownerId.trim() : '';
   const target = parseTabTarget(cmd);
+  const assertOwner = (targetId: string): void => {
+    if (!ownerId) return;
+    const tabOwner = state.tabOwnership.ownerOf(targetId);
+    if (tabOwner !== ownerId) {
+      throw new Error(`OwnerConflict: tab ${targetId} is not owned by ${ownerId}`);
+    }
+  };
   try {
     if (target.tabId) {
-      mgr.setActivePageByTargetId(resolveTabTargetId(mgr, target.tabId));
+      const resolved = resolveTabTargetId(mgr, target.tabId);
+      assertOwner(resolved);
+      mgr.setActivePageByTargetId(resolved);
     } else if (target.label) {
-      mgr.setActivePageByTargetId(resolveTabTargetId(mgr, target.label));
+      const resolved = resolveTabTargetId(mgr, target.label);
+      assertOwner(resolved);
+      mgr.setActivePageByTargetId(resolved);
     } else if (typeof target.index === 'number') {
+      const pages = mgr.getPages?.() || [];
+      const page = pages[target.index];
+      if (!page?.targetId) throw new Error('Tab not found');
+      assertOwner(page.targetId);
       mgr.setActivePage(target.index);
     } else {
       return { id, success: false, error: 'Missing tab target. Use tab <label|tab-id>' };
@@ -154,19 +177,36 @@ export async function handleTabClose(cmd: any, state: DaemonState): Promise<any>
   }
 
   await syncTabsIfSupported(mgr);
+  const ownerId = typeof cmd.ownerId === 'string' ? cmd.ownerId.trim() : '';
   const target = parseTabTarget(cmd);
+  const assertOwner = (targetId: string): void => {
+    if (!ownerId) return;
+    const tabOwner = state.tabOwnership.ownerOf(targetId);
+    if (tabOwner !== ownerId) {
+      throw new Error(`OwnerConflict: tab ${targetId} is not owned by ${ownerId}`);
+    }
+  };
   try {
     if (target.tabId) {
-      await mgr.closePage(resolveTabTargetId(mgr, target.tabId));
+      const resolved = resolveTabTargetId(mgr, target.tabId);
+      assertOwner(resolved);
+      await mgr.closePage(resolved);
     } else if (target.label) {
-      await mgr.closePage(resolveTabTargetId(mgr, target.label));
+      const resolved = resolveTabTargetId(mgr, target.label);
+      assertOwner(resolved);
+      await mgr.closePage(resolved);
     } else if (typeof target.index === 'number') {
+      const pages = mgr.getPages?.() || [];
+      const page = pages[target.index];
+      if (!page?.targetId) throw new Error('Tab not found');
+      assertOwner(page.targetId);
       await mgr.closePageByIndex(target.index);
     } else {
       const active = mgr.getActivePage();
       if (!active) {
         return { id, success: false, error: 'No active tab to close' };
       }
+      assertOwner(active.targetId);
       await mgr.closePage(active.targetId);
     }
   } catch (error: any) {
@@ -192,10 +232,14 @@ export async function handleWindowNew(cmd: any, state: DaemonState): Promise<any
   }
 
   await syncTabsIfSupported(mgr);
+  const ownerId = typeof cmd.ownerId === 'string' ? cmd.ownerId.trim() : '';
   const page = await mgr.createNewWindow();
+  if (ownerId) {
+    state.tabOwnership.bindTabToOwner(page.targetId, ownerId, { createdByOwner: true });
+  }
 
   if (typeof cmd.url === 'string' && cmd.url.trim().length > 0) {
-    await mgr.navigate(cmd.url);
+    await mgr.navigate(cmd.url, undefined, page.sessionId);
   }
   if (typeof cmd.label === 'string' && cmd.label.trim().length > 0) {
     mgr.setTabLabel(page.targetId, cmd.label);

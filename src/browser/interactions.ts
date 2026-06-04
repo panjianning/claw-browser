@@ -49,6 +49,11 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
     state.iframeSessions
   );
 
+  const ownerId = typeof cmd.ownerId === 'string' ? cmd.ownerId.trim() : '';
+  const tabsBeforeAll = captureTabsSnapshot(mgr, state);
+  const tabsBeforeAllIds = new Set(tabsBeforeAll.map((tab) => tab.id));
+  const tabsBeforeClick = captureTabsSnapshot(mgr, state, ownerId);
+
   if (cmd.newTab === true) {
     const hrefResult = await mgr.client.sendCommand(
       'Runtime.callFunctionOn',
@@ -70,8 +75,24 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
     }
     const newPage = await mgr.createNewPage();
     await mgr.navigate(href, undefined, newPage.sessionId);
+    await syncTabsAfterClickIfSupported(mgr);
+    const openerTabId = typeof cmd.tabId === 'string' ? cmd.tabId.trim() : undefined;
+    const afterClick = await waitForTabsAfterClick(mgr, state, ownerId, tabsBeforeAllIds, openerTabId);
     state.refMap.clear();
-    return { id, success: true, data: { clicked: selector, newTab: true, url: href, tabId: newPage.targetId } };
+    return {
+      id,
+      success: true,
+      data: {
+        clicked: selector,
+        newTab: true,
+        url: href,
+        tabId: newPage.targetId,
+        tabsBeforeClick,
+        tabsAfterClick: afterClick.newTabsAfterClick,
+        tabsSnapshotAfterClick: afterClick.tabsAfterClick,
+        newTabsAfterClick: afterClick.newTabsAfterClick,
+      },
+    };
   }
 
   const button = cmd.button || 'left';
@@ -112,7 +133,142 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
     effectiveSessionId
   );
 
-  return { id, success: true, data: { clicked: selector } };
+  await syncTabsAfterClickIfSupported(mgr);
+  const openerTabId = typeof cmd.tabId === 'string' ? cmd.tabId.trim() : undefined;
+  const afterClick = await waitForTabsAfterClick(mgr, state, ownerId, tabsBeforeAllIds, openerTabId);
+
+  return {
+    id,
+    success: true,
+    data: {
+      clicked: selector,
+      tabsBeforeClick,
+      tabsAfterClick: afterClick.newTabsAfterClick,
+      tabsSnapshotAfterClick: afterClick.tabsAfterClick,
+      newTabsAfterClick: afterClick.newTabsAfterClick,
+    },
+  };
+}
+
+async function syncTabsAfterClickIfSupported(mgr: any): Promise<void> {
+  if (!mgr || typeof mgr.syncTrackedTabs !== 'function') {
+    return;
+  }
+  try {
+    // Give CDP target events a brief moment to settle after click.
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    await mgr.syncTrackedTabs({ ensurePageIfEmpty: false });
+  } catch {
+    // Best effort only.
+  }
+}
+
+async function waitForTabsAfterClick(
+  mgr: any,
+  state: DaemonState,
+  ownerId: string,
+  tabsBeforeAllIds: Set<string>,
+  openerTabId?: string
+): Promise<{
+  tabsAfterClick: Array<{ id: string; tabId: string; title: string; url: string; active: boolean; index: number; label?: string }>;
+  newTabsAfterClick: Array<{ id: string; tabId: string; title: string; url: string; active: boolean; index: number; label?: string }>;
+}> {
+  const timeoutMs = 1500;
+  const deadline = Date.now() + timeoutMs;
+  const seenNewTabIds = new Set<string>();
+
+  while (true) {
+    await syncTabsAfterClickIfSupported(mgr);
+    if (ownerId) {
+      // Ensure opener->child owner inheritance is applied before filtering by owner.
+      await state.tabOwnership.syncWithBrowser().catch(() => undefined);
+    }
+    const allTabs = captureTabsSnapshot(mgr, state);
+    const newTabIds = await detectNewTabsFromOpener(
+      mgr,
+      allTabs.map((tab) => tab.id),
+      tabsBeforeAllIds,
+      openerTabId
+    );
+    for (const tabId of newTabIds) {
+      seenNewTabIds.add(tabId);
+    }
+
+    if (ownerId && newTabIds.length > 0) {
+      for (const tabId of newTabIds) {
+        await state.tabOwnership.enforceTabOwnership(ownerId, tabId).catch(() => undefined);
+      }
+    }
+
+    const tabs = captureTabsSnapshot(mgr, state, ownerId);
+    const newTabsAfterClick = tabs.filter((tab) => seenNewTabIds.has(String(tab.id || tab.tabId || '').trim()));
+    if (newTabsAfterClick.length > 0 || Date.now() >= deadline) {
+      return {
+        tabsAfterClick: tabs,
+        newTabsAfterClick,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+}
+
+async function detectNewTabsFromOpener(
+  mgr: any,
+  allTabIds: string[],
+  tabsBeforeAllIds: Set<string>,
+  openerTabId?: string
+): Promise<string[]> {
+  const directNew = allTabIds.filter((tabId) => !tabsBeforeAllIds.has(tabId));
+  if (!openerTabId || !mgr?.client) {
+    return directNew;
+  }
+
+  try {
+    const result = await mgr.client.sendCommand('Target.getTargets', {});
+    const infos = Array.isArray((result as any)?.targetInfos) ? (result as any).targetInfos : [];
+    const fromOpener = infos
+      .filter((target: any) => {
+        const targetId = String(target?.targetId || '').trim();
+        const openerId = String(target?.openerTargetId || '').trim();
+        const type = String(target?.type || '').trim();
+        return (
+          (type === 'page' || type === 'webview') &&
+          targetId.length > 0 &&
+          !tabsBeforeAllIds.has(targetId) &&
+          openerId === openerTabId
+        );
+      })
+      .map((target: any) => String(target.targetId));
+
+    if (fromOpener.length > 0) {
+      return fromOpener;
+    }
+  } catch {
+    // Fall back to direct new-tab diff.
+  }
+
+  return directNew;
+}
+
+function captureTabsSnapshot(
+  mgr: any,
+  state: DaemonState,
+  ownerId?: string
+): Array<{ id: string; tabId: string; title: string; url: string; active: boolean; index: number; label?: string }> {
+  if (!mgr || typeof mgr.tabList !== 'function') {
+    return [];
+  }
+  const tabs = mgr.tabList();
+  const list = Array.isArray(tabs) ? tabs : [];
+  const normalizedOwner = typeof ownerId === 'string' ? ownerId.trim() : '';
+  if (!normalizedOwner) {
+    return list;
+  }
+  return list.filter((tab: any) => {
+    const tabId = String(tab?.id || tab?.tabId || '').trim();
+    if (!tabId) return false;
+    return state.tabOwnership.ownerOf(tabId) === normalizedOwner;
+  });
 }
 
 export async function handleDblclick(cmd: any, state: DaemonState): Promise<any> {

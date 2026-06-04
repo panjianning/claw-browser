@@ -24,6 +24,9 @@ const TAB_ID_OPTIONAL_ACTIONS = new Set([
   'install',
   'upgrade',
   'chat',
+  'owner_list',
+  'owner_release',
+  'owner_gc',
 ]);
 
 const TAB_ID_SKIP_BIND_ACTIONS = new Set([
@@ -56,10 +59,10 @@ export function isValidSessionName(name: string): boolean {
 export function parseCommand(args: string[], flags: Flags = {}): Command {
   const result = parseCommandInner(args, flags);
 
-  if (!flags.tabId && !TAB_ID_OPTIONAL_ACTIONS.has(result.action)) {
+  if (!flags.tabId && !flags.ownerId && !TAB_ID_OPTIONAL_ACTIONS.has(result.action)) {
     const cmdText = args.join(' ');
     throw new InvalidValueError(
-      'Missing required global option: --tab-id',
+      'Missing required global option: --tab-id or --owner-id',
       `--tab-id <tab-id> ${cmdText}`.trim()
     );
   }
@@ -73,6 +76,10 @@ export function parseCommand(args: string[], flags: Flags = {}): Command {
     if (!TAB_ID_SKIP_BIND_ACTIONS.has(result.action)) {
       result.tabId = flags.tabId;
     }
+  }
+
+  if (flags.ownerId) {
+    result.ownerId = flags.ownerId;
   }
 
   return result;
@@ -905,6 +912,29 @@ function parseCommandInner(args: string[], flags: Flags): Command {
         i++;
       }
       return cmd;
+    }
+
+    case 'owner': {
+      const sub = rest[0];
+      if (!sub || sub === 'list') {
+        return { id, action: 'owner_list' };
+      }
+      if (sub === 'release') {
+        const targetOwnerId = String(rest[1] || '').trim();
+        if (!targetOwnerId) {
+          throw new MissingArgumentsError('owner release', 'owner release <owner-id>');
+        }
+        return { id, action: 'owner_release', targetOwnerId };
+      }
+      if (sub === 'gc') {
+        const cmd: Command = { id, action: 'owner_gc' };
+        const ttlIndex = rest.findIndex((arg) => arg === '--ttl-ms');
+        if (ttlIndex !== -1 && ttlIndex + 1 < rest.length) {
+          cmd.ttlMs = Number(rest[ttlIndex + 1]);
+        }
+        return cmd;
+      }
+      throw new UnknownSubcommandError(sub, ['list', 'release', 'gc']);
     }
 
     case 'frame': {

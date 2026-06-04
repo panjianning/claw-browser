@@ -250,6 +250,7 @@ export interface Flags {
   headless?: boolean;
   cdp?: string;
   tabId?: string;
+  ownerId?: string;
   json?: boolean;
   session?: string;
   profile?: string;

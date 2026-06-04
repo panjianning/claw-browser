@@ -252,6 +252,39 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
     return;
   }
 
+  if (action === 'owner_list') {
+    const owners = Array.isArray(data.owners) ? data.owners : [];
+    if (owners.length === 0) {
+      console.log('No active owners.');
+      return;
+    }
+    for (const item of owners) {
+      const ownerId = typeof item.ownerId === 'string' ? item.ownerId : '';
+      const tabCount = Number(item.tabCount || 0);
+      const heartbeatAt = typeof item.heartbeatAt === 'number' ? item.heartbeatAt : null;
+      const hb = heartbeatAt ? new Date(heartbeatAt).toISOString() : 'n/a';
+      console.log(`${ownerId} tabs=${tabCount} heartbeat=${hb}`);
+    }
+    return;
+  }
+
+  if (action === 'owner_release') {
+    const ownerId = typeof data.ownerId === 'string' ? data.ownerId : '';
+    console.log(`Released owner: ${ownerId}`);
+    return;
+  }
+
+  if (action === 'owner_gc') {
+    const released = Array.isArray(data.releasedOwners) ? data.releasedOwners : [];
+    console.log(`Owner GC released ${released.length} owner(s).`);
+    if (released.length > 0) {
+      for (const ownerId of released) {
+        console.log(`- ${ownerId}`);
+      }
+    }
+    return;
+  }
+
   if (
     action === 'tab_new' ||
     action === 'newTab' ||
@@ -1060,8 +1093,12 @@ async function main() {
       console.log(`Session '${session}': command channel connected.`);
     }
 
-    // Send command
-    const response = await connection.sendCommand(command, session);
+    const send = async () => connection.sendCommand(command, session);
+    let response = await send();
+    if (!response.success && typeof response.error === 'string' && /^Unknown action:\s+owner_/i.test(response.error)) {
+      await connection.forceStopDaemon(session);
+      response = await send();
+    }
 
     if (jsonMode) {
       printJsonValue(response);

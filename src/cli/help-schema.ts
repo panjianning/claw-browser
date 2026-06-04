@@ -27,6 +27,7 @@ export const GLOBAL_FLAG_DEFS: GlobalFlagDef[] = [
   { names: ['--session'], field: 'session', kind: 'string', description: 'Select session.' },
   { names: ['--profile'], field: 'profile', kind: 'string', description: 'Browser profile path/name.' },
   { names: ['--tab-id', '--tabid'], field: 'tabId', kind: 'string', description: 'Required for most browser actions; route command to a specific tab.' },
+  { names: ['--owner-id', '--ownerid'], field: 'ownerId', kind: 'string', description: 'Owner isolation ID. Commands can only operate on tabs owned by this owner.' },
   { names: ['--cdp'], field: 'cdp', kind: 'string', description: 'Connect daemon commands to a CDP endpoint.' },
   { names: ['--provider'], field: 'provider', kind: 'string', description: 'Provider selector.' },
   { names: ['--device'], field: 'device', kind: 'string', description: 'Device selector.' },
@@ -216,6 +217,14 @@ export const HELP_CATALOG: Record<string, HelpTopic> = {
   },
   site: { usage: 'claw-browser [global options] site <list|search|info|update|<adapter>> [args...]' },
   pipeline: { usage: 'claw-browser [global options] pipeline <list|info|run|status|logs|cancel|runs|rerun|modules|module-info> ...' },
+  owner: {
+    usage: 'claw-browser [global options] owner <list|release|gc> ...',
+    subcommands: {
+      list: { usage: 'claw-browser [global options] owner list' },
+      release: { usage: 'claw-browser [global options] owner release <owner-id>' },
+      gc: { usage: 'claw-browser [global options] owner gc [--ttl-ms <ms>]' },
+    },
+  },
   session: {
     usage: 'claw-browser session <start|stop|stop-all|list> [session]',
     description: 'Manage daemon sessions.',

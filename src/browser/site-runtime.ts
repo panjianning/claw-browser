@@ -44,7 +44,7 @@ type SiteRuntimeContext = {
   closeTab: (tabId: string) => Promise<void>;
   activateTab: (tabId: string) => Promise<void>;
   navigateTab: (tabId: string, url: string) => Promise<void>;
-  executeScriptInTab: (tabId: string, script: string) => Promise<unknown>;
+  executeScriptInTab: (tabId: string, script: string, ownerId?: string) => Promise<unknown>;
 };
 
 export type SiteActionRequest = {
@@ -552,7 +552,7 @@ export class SiteRuntime {
       await this.context.navigateTab(targetTabId, targetUrl);
     }
 
-    const raw = await this.context.executeScriptInTab(targetTabId, script);
+    const raw = await this.context.executeScriptInTab(targetTabId, script, ownerId || undefined);
     const parsed = this.parseMaybeJson(raw);
 
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {

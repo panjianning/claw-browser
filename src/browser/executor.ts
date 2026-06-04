@@ -94,6 +94,12 @@ const TAB_BOUND_ACTIONS = new Set([
   'selectall', 'scrollintoview', 'dispatch', 'highlight', 'setvalue', 'styles', 'bringtofront', 'upload', 'addscript', 'addinitscript', 'addstyle', 'clipboard', 'pause', 'responsebody',
 ]);
 
+const OWNER_META_ACTIONS = new Set([
+  'owner_list',
+  'owner_release',
+  'owner_gc',
+]);
+
 // ============================================================================
 // Command Execution Router
 // ============================================================================
@@ -221,6 +227,10 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     await state.tabOwnership.syncWithBrowser();
     if (typeof cmd.tabId === 'string' && cmd.tabId.trim().length > 0) {
       try {
+        if (state.browser) {
+          // Normalize tab reference (label/prefix/full id) before ownership checks.
+          cmd.tabId = resolveTabIdReference(state.browser, cmd.tabId);
+        }
         await state.tabOwnership.enforceTabOwnership(ownerId, cmd.tabId);
       } catch (error: any) {
         return typedErrorResponse(id, 'OwnerConflict', error?.message || String(error));
@@ -231,6 +241,53 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
         cmd.tabId = boundTab;
       }
     }
+  }
+
+  if (action === 'owner_list') {
+    await state.tabOwnership.syncWithBrowser();
+    const rows = state.tabOwnership.snapshot();
+    const byOwner = new Map<string, Array<{ tabId: string; createdByOwner: boolean; claimedAt: number }>>();
+    for (const row of rows) {
+      const list = byOwner.get(row.ownerId) || [];
+      list.push({ tabId: row.tabId, createdByOwner: row.createdByOwner, claimedAt: row.claimedAt });
+      byOwner.set(row.ownerId, list);
+    }
+    const owners = [...byOwner.entries()].map(([id, tabs]) => ({
+      ownerId: id,
+      tabCount: tabs.length,
+      tabs,
+      heartbeatAt: state.tabOwnership.ownerHeartbeat(id),
+    }));
+    owners.sort((a, b) => a.ownerId.localeCompare(b.ownerId));
+    return successResponse(id, { owners });
+  }
+
+  if (action === 'owner_release') {
+    const targetOwnerId = typeof cmd.targetOwnerId === 'string' ? cmd.targetOwnerId.trim() : '';
+    if (!targetOwnerId) {
+      return errorResponse(id, 'Missing targetOwnerId');
+    }
+    await state.tabOwnership.releaseOwner(targetOwnerId, { closeOwnedTabs: false });
+    return successResponse(id, { ownerId: targetOwnerId, released: true });
+  }
+
+  if (action === 'owner_gc') {
+    await state.tabOwnership.syncWithBrowser();
+    const ttlMsRaw = Number(cmd.ttlMs);
+    const ttlMs = Number.isFinite(ttlMsRaw) && ttlMsRaw > 0 ? ttlMsRaw : 5 * 60 * 1000;
+    const snapshot = state.tabOwnership.snapshot();
+    const ownerIds = [...new Set(snapshot.map((item) => item.ownerId))];
+    const now = Date.now();
+    const releasedOwners: string[] = [];
+    for (const oid of ownerIds) {
+      const heartbeat = state.tabOwnership.ownerHeartbeat(oid) || 0;
+      if (heartbeat > 0 && now - heartbeat <= ttlMs) {
+        continue;
+      }
+      await state.tabOwnership.releaseOwner(oid, { closeOwnedTabs: false });
+      releasedOwners.push(oid);
+    }
+    return successResponse(id, { ttlMs, releasedOwners });
   }
 
   if (!cmd.tabId && TAB_BOUND_ACTIONS.has(action) && ownerId.length === 0) {
@@ -254,6 +311,25 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     } catch (error: any) {
       return errorResponse(id, error?.message || `Tab not found: ${String(cmd.tabId)}`);
     }
+  }
+
+  if (!ownerId && cmd.tabId && TAB_BOUND_ACTIONS.has(action)) {
+    const currentOwner = state.tabOwnership.ownerOf(String(cmd.tabId));
+    if (currentOwner) {
+      return typedErrorResponse(
+        id,
+        'OwnerConflict',
+        `Tab ${String(cmd.tabId)} is owned by ${currentOwner}. Provide --owner-id ${currentOwner}.`
+      );
+    }
+  }
+
+  if (!ownerId && TAB_BOUND_ACTIONS.has(action) && action !== 'tab_list') {
+    return typedErrorResponse(
+      id,
+      'OwnerRequired',
+      'Missing ownerId. Provide --owner-id for tab-scoped commands.'
+    );
   }
 
   // WebDriver backend: reject unsupported actions
@@ -707,13 +783,14 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
               }
               await state.browser.navigate(url, undefined, page.sessionId);
             },
-            executeScriptInTab: async (tabId: string, script: string) => {
+            executeScriptInTab: async (tabId: string, script: string, ownerId?: string) => {
               if (!state.browser) throw new Error('Browser not launched');
               const result = await executeCommand(
                 {
                   id: `site-eval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                   action: 'evaluate',
                   tabId,
+                  ...(ownerId ? { ownerId } : {}),
                   script,
                 },
                 state
@@ -867,7 +944,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
               }
               await state.browser.navigate(url, undefined, page.sessionId);
             },
-            executeScriptInTab: async (tabId: string, script: string) => {
+            executeScriptInTab: async (tabId: string, script: string, ownerId?: string) => {
               if (!state.browser) throw new Error('Browser not launched');
               // Use executeCommand so tab/session routing is resolved consistently.
               const result = await executeCommand(
@@ -875,6 +952,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
                   id: `site-eval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                   action: 'evaluate',
                   tabId,
+                  ...(ownerId ? { ownerId } : {}),
                   script,
                 },
                 state
