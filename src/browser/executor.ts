@@ -239,6 +239,19 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
       const boundTab = state.tabOwnership.getOwnerRootTab(ownerId);
       if (boundTab) {
         cmd.tabId = boundTab;
+      } else if (TAB_BOUND_ACTIONS.has(action)) {
+        const activePage = state.browser?.getActivePage?.();
+        const activeTabId =
+          activePage && typeof activePage.targetId === 'string' ? activePage.targetId.trim() : '';
+        if (!activeTabId) {
+          return typedErrorResponse(id, 'TabNotFound', 'No active tab available for owner binding.');
+        }
+        try {
+          await state.tabOwnership.enforceTabOwnership(ownerId, activeTabId);
+          cmd.tabId = activeTabId;
+        } catch (error: any) {
+          return typedErrorResponse(id, 'OwnerConflict', error?.message || String(error));
+        }
       }
     }
   }

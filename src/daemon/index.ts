@@ -444,4 +444,5 @@ const GLOBAL_ACTIONS = new Set([
 const READ_ONLY_ACTIONS = new Set([
   'tab_list',
   'listTabs',
+  'owner_list',
 ]);
