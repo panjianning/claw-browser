@@ -4,6 +4,7 @@ import { startHttpServer } from '../daemon/http-server.js';
 import { startWebSocketServer } from '../daemon/ws-server.js';
 import * as fs from 'fs/promises';
 import * as path from 'path';
+import { commandSessionId } from './execution-context.js';
 
 function ok(id: string, data: Record<string, unknown>): any {
   return { id, success: true, data };
@@ -13,12 +14,12 @@ function fail(id: string, error: string): any {
   return { id, success: false, error };
 }
 
-function getSession(state: DaemonState): { mgr: any; sessionId: string } {
+function getSession(cmd: any, state: DaemonState): { mgr: any; sessionId: string } {
   const mgr = state.browser;
   if (!mgr) {
     throw new Error('Browser not launched');
   }
-  return { mgr, sessionId: mgr.activeSessionId?.() || '' };
+  return { mgr, sessionId: commandSessionId(cmd, mgr) };
 }
 
 function buildSelectorExpression(selector: string): string {
@@ -53,7 +54,7 @@ export async function handleFrame(cmd: any, state: DaemonState): Promise<any> {
     return fail(id, "Missing 'selector' parameter");
   }
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const objectId = await resolveObjectId(mgr.client, sessionId, selector);
     const describe = await mgr.client.sendCommand(
       'DOM.describeNode',
@@ -85,7 +86,7 @@ export async function handleSetContent(cmd: any, state: DaemonState): Promise<an
     return fail(id, "Missing 'html' parameter");
   }
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand(
       'Runtime.evaluate',
       {
@@ -189,7 +190,7 @@ export async function handleResponseBody(cmd: any, state: DaemonState): Promise<
   const requestId = String(cmd.requestId || '').trim();
   if (!requestId) return fail(id, "Missing 'requestId' parameter");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const res = await mgr.client.sendCommand('Network.getResponseBody', { requestId }, sessionId);
     const body = res?.base64Encoded ? Buffer.from(res.body || '', 'base64').toString('utf-8') : (res?.body || '');
     return ok(id, { requestId, body, base64Encoded: Boolean(res?.base64Encoded) });
@@ -203,7 +204,7 @@ export async function handleUserAgent(cmd: any, state: DaemonState): Promise<any
   const userAgent = String(cmd.userAgent || '').trim();
   if (!userAgent) return fail(id, "Missing 'userAgent' parameter");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand('Network.setUserAgentOverride', { userAgent }, sessionId);
     return ok(id, { userAgent });
   } catch (error: any) {
@@ -215,7 +216,7 @@ export async function handleSetMedia(cmd: any, state: DaemonState): Promise<any>
   const id = cmd.id || '';
   const colorScheme = typeof cmd.colorScheme === 'string' ? cmd.colorScheme : 'light';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand(
       'Emulation.setEmulatedMedia',
       {
@@ -235,7 +236,7 @@ export async function handleTimezone(cmd: any, state: DaemonState): Promise<any>
   const timezoneId = String(cmd.timezoneId || '').trim();
   if (!timezoneId) return fail(id, "Missing 'timezoneId' parameter");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand('Emulation.setTimezoneOverride', { timezoneId }, sessionId);
     return ok(id, { timezoneId });
   } catch (error: any) {
@@ -248,7 +249,7 @@ export async function handleLocale(cmd: any, state: DaemonState): Promise<any> {
   const locale = String(cmd.locale || '').trim();
   if (!locale) return fail(id, "Missing 'locale' parameter");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand('Emulation.setLocaleOverride', { locale }, sessionId);
     return ok(id, { locale });
   } catch (error: any) {
@@ -264,7 +265,7 @@ export async function handleGeolocation(cmd: any, state: DaemonState): Promise<a
     return fail(id, 'Invalid latitude/longitude');
   }
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand(
       'Emulation.setGeolocationOverride',
       { latitude, longitude, accuracy: 100 },
@@ -283,7 +284,7 @@ export async function handlePermissions(cmd: any, state: DaemonState): Promise<a
     return fail(id, "Missing 'permissions' parameter");
   }
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const origin = await mgr.getUrl().catch(() => 'https://example.com');
     await mgr.client.sendCommand(
       'Browser.grantPermissions',
@@ -300,7 +301,7 @@ export async function handleDialog(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   const op = String(cmd.op || 'status');
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     if (op === 'status') {
       const d = state.pendingDialog;
       return ok(id, {
@@ -328,7 +329,7 @@ export async function handleDialog(cmd: any, state: DaemonState): Promise<any> {
 export async function handleBringToFront(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand('Page.bringToFront', {}, sessionId);
     return ok(id, { broughtToFront: true });
   } catch (error: any) {
@@ -339,7 +340,7 @@ export async function handleBringToFront(cmd: any, state: DaemonState): Promise<
 export async function handleInspect(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr } = getSession(state);
+    const { mgr } = getSession(cmd, state);
     const cdp = typeof mgr.getCdpUrl === 'function' ? mgr.getCdpUrl() : '';
     return ok(id, { opened: false, url: cdp, note: 'Use this CDP URL in Chrome DevTools manually' });
   } catch (error: any) {
@@ -414,7 +415,7 @@ export async function handlePdf(cmd: any, state: DaemonState): Promise<any> {
     return fail(id, "Missing 'path' parameter");
   }
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const result = await mgr.client.sendCommand('Page.printToPDF', { printBackground: true }, sessionId);
     const pdfBase64 = result?.data || '';
     const buffer = Buffer.from(pdfBase64, 'base64');
@@ -443,7 +444,7 @@ export async function handleDevice(cmd: any, state: DaemonState): Promise<any> {
     return fail(id, `Unknown device preset: ${cmd.name}`);
   }
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand(
       'Emulation.setDeviceMetricsOverride',
       {
@@ -471,7 +472,7 @@ export async function handleDownload(cmd: any, state: DaemonState): Promise<any>
     return fail(id, "Missing 'selector' or 'path' parameter");
   }
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const objectId = await resolveObjectId(mgr.client, sessionId, selector);
     const point = await mgr.client.sendCommand(
       'Runtime.callFunctionOn',
@@ -544,7 +545,7 @@ export async function handleStreamStatus(cmd: any, state: DaemonState): Promise<
 export async function handleScreencastStart(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand(
       'Page.startScreencast',
       { format: 'jpeg', quality: 70, maxWidth: 1280, maxHeight: 720, everyNthFrame: 1 },
@@ -560,7 +561,7 @@ export async function handleScreencastStart(cmd: any, state: DaemonState): Promi
 export async function handleScreencastStop(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand('Page.stopScreencast', {}, sessionId);
     state.screencasting = false;
     return ok(id, { screencasting: false });
@@ -609,7 +610,7 @@ export async function handleFind(cmd: any, state: DaemonState): Promise<any> {
 
   const selector = selectorFromFind(kind, query);
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     if (action === 'count') {
       const res = await mgr.client.sendCommand(
         'Runtime.evaluate',
@@ -670,7 +671,7 @@ export async function handleHighlight(cmd: any, state: DaemonState): Promise<any
   const selector = String(cmd.selector || '').trim();
   if (!selector) return fail(id, "Missing 'selector' parameter");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const objectId = await resolveObjectId(mgr.client, sessionId, selector);
     await mgr.client.sendCommand(
       'Runtime.callFunctionOn',
@@ -689,7 +690,7 @@ export async function handleHighlight(cmd: any, state: DaemonState): Promise<any
 export async function handleSelectAll(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand('Runtime.evaluate', { expression: 'document.execCommand("selectAll")' }, sessionId);
     return ok(id, { selectedAll: true });
   } catch (error: any) {
@@ -701,7 +702,7 @@ export async function handleClipboard(cmd: any, state: DaemonState): Promise<any
   const id = cmd.id || '';
   const op = String(cmd.op || '').trim().toLowerCase();
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     if (op === 'read') {
       const res = await mgr.client.sendCommand(
         'Runtime.evaluate',
@@ -787,7 +788,7 @@ export async function handleDispatch(cmd: any, state: DaemonState): Promise<any>
   const event = String(cmd.event || cmd.type || '').trim();
   if (!selector || !event) return fail(id, "Missing 'selector' or 'event'");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const objectId = await resolveObjectId(mgr.client, sessionId, selector);
     await mgr.client.sendCommand(
       'Runtime.callFunctionOn',
@@ -809,7 +810,7 @@ export async function handleAddScript(cmd: any, state: DaemonState): Promise<any
   const script = String(cmd.script || '').trim();
   if (!script) return fail(id, "Missing 'script' parameter");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand('Runtime.evaluate', { expression: script, awaitPromise: true }, sessionId);
     return ok(id, { executed: true });
   } catch (error: any) {
@@ -822,7 +823,7 @@ export async function handleAddInitScript(cmd: any, state: DaemonState): Promise
   const script = String(cmd.script || '').trim();
   if (!script) return fail(id, "Missing 'script' parameter");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const result = await mgr.client.sendCommand('Page.addScriptToEvaluateOnNewDocument', { source: script }, sessionId);
     return ok(id, { identifier: result?.identifier || null });
   } catch (error: any) {
@@ -835,7 +836,7 @@ export async function handleAddStyle(cmd: any, state: DaemonState): Promise<any>
   const css = String(cmd.css || cmd.style || '').trim();
   if (!css) return fail(id, "Missing 'css' parameter");
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand(
       'Runtime.evaluate',
       {
@@ -888,7 +889,7 @@ export async function handleTap(cmd: any, state: DaemonState): Promise<any> {
 export async function handleTraceStart(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand(
       'Tracing.start',
       {
@@ -908,7 +909,7 @@ export async function handleTraceStart(cmd: any, state: DaemonState): Promise<an
 export async function handleTraceStop(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     if (state.tracingState.tracing) {
       await mgr.client.sendCommand('Tracing.end', {}, sessionId);
     }
@@ -922,7 +923,7 @@ export async function handleTraceStop(cmd: any, state: DaemonState): Promise<any
 export async function handleProfilerStart(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await mgr.client.sendCommand('Profiler.enable', {}, sessionId);
     await mgr.client.sendCommand('Profiler.start', {}, sessionId);
     return ok(id, { profiling: true });
@@ -934,7 +935,7 @@ export async function handleProfilerStart(cmd: any, state: DaemonState): Promise
 export async function handleProfilerStop(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const result = await mgr.client.sendCommand('Profiler.stop', {}, sessionId);
     await mgr.client.sendCommand('Profiler.disable', {}, sessionId).catch(() => {});
     const outPath = typeof cmd.path === 'string' && cmd.path.trim().length > 0 ? cmd.path : '';

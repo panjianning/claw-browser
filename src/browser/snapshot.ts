@@ -1,5 +1,6 @@
 import type { DaemonState } from './state.js';
 import { takeSnapshot } from '../cdp/accessibility.js';
+import { commandSessionId } from './execution-context.js';
 
 /**
  * Snapshot and screenshot action handlers
@@ -13,7 +14,7 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   // Extract options
   const compact = cmd.compact === true;
@@ -57,7 +58,7 @@ export async function handleSnapshot(cmd: any, state: DaemonState): Promise<any>
       state.refMap.set(`@${refId}`, entry);
     }
 
-    const url = await mgr.getUrl().catch(() => '');
+    const url = await mgr.getUrl(sessionId).catch(() => '');
 
     return {
       id,
@@ -85,7 +86,7 @@ export async function handleScreenshot(cmd: any, state: DaemonState): Promise<an
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   // Extract options
   const path = cmd.path;

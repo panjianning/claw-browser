@@ -1,5 +1,6 @@
 import type { DaemonState } from './state.js';
 import type { CdpClient } from '../cdp/client.js';
+import { commandSessionId } from './execution-context.js';
 
 /**
  * Wait operation handlers
@@ -85,7 +86,7 @@ export async function handleWaitForUrl(
   const timeoutMs = state.timeoutMs(cmd);
 
   await waitForUrl(mgr.client, sessionId, urlPattern, timeoutMs);
-  const url = await mgr.getUrl().catch(() => '');
+  const url = await mgr.getUrl(sessionId).catch(() => '');
   return { id, success: true, data: { url } };
 }
 
@@ -334,10 +335,7 @@ async function waitForEvent(
 }
 
 function getWaitSessionId(cmd: any, mgr: any): string {
-  if (cmd && typeof cmd.sessionId === 'string' && cmd.sessionId.length > 0) {
-    return cmd.sessionId;
-  }
-  return mgr.activeSessionId?.() || '';
+  return commandSessionId(cmd, mgr);
 }
 
 function normalizeWaitUntil(raw: string): string {

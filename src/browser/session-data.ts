@@ -2,19 +2,20 @@ import type { DaemonState } from './state.js';
 import { clearCookies, getAllCookies, setCookies } from '../cdp/cookies.js';
 import { setExtraHeaders, setOffline } from '../cdp/network.js';
 import { storageClear, storageGet, storageSet } from '../cdp/storage.js';
+import { commandSessionId } from './execution-context.js';
 
-function getSession(state: DaemonState): { mgr: any; sessionId: string } {
+function getSession(cmd: any, state: DaemonState): { mgr: any; sessionId: string } {
   const mgr = state.browser;
   if (!mgr) {
     throw new Error('Browser not launched');
   }
-  return { mgr, sessionId: mgr.activeSessionId?.() || '' };
+  return { mgr, sessionId: commandSessionId(cmd, mgr) };
 }
 
 export async function handleCookiesGet(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const cookies = await getAllCookies(mgr.client, sessionId);
     return { id, success: true, data: { cookies } };
   } catch (error: any) {
@@ -25,13 +26,13 @@ export async function handleCookiesGet(cmd: any, state: DaemonState): Promise<an
 export async function handleCookiesSet(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const name = String(cmd.name || '').trim();
     const value = cmd.value === undefined || cmd.value === null ? '' : String(cmd.value);
     if (!name) {
       return { id, success: false, error: 'Missing cookie name' };
     }
-    const currentUrl = await mgr.getUrl().catch(() => undefined);
+    const currentUrl = await mgr.getUrl(sessionId).catch(() => undefined);
     await setCookies(mgr.client, sessionId, [{ name, value }], currentUrl);
     return { id, success: true, data: { set: true, name } };
   } catch (error: any) {
@@ -42,7 +43,7 @@ export async function handleCookiesSet(cmd: any, state: DaemonState): Promise<an
 export async function handleCookiesClear(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     await clearCookies(mgr.client, sessionId);
     return { id, success: true, data: { cleared: true } };
   } catch (error: any) {
@@ -53,7 +54,7 @@ export async function handleCookiesClear(cmd: any, state: DaemonState): Promise<
 export async function handleStorageGet(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const type = cmd.type === 'session' ? 'session' : 'local';
     const key = typeof cmd.key === 'string' ? cmd.key : undefined;
     const data = await storageGet(mgr.client, sessionId, type, key);
@@ -66,7 +67,7 @@ export async function handleStorageGet(cmd: any, state: DaemonState): Promise<an
 export async function handleStorageSet(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const type = cmd.type === 'session' ? 'session' : 'local';
     const key = String(cmd.key || '').trim();
     if (!key) {
@@ -83,7 +84,7 @@ export async function handleStorageSet(cmd: any, state: DaemonState): Promise<an
 export async function handleStorageClear(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const type = cmd.type === 'session' ? 'session' : 'local';
     await storageClear(mgr.client, sessionId, type);
     return { id, success: true, data: { cleared: true, type } };
@@ -95,7 +96,7 @@ export async function handleStorageClear(cmd: any, state: DaemonState): Promise<
 export async function handleSetHeaders(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     let headers: Record<string, string>;
     if (typeof cmd.headers === 'string') {
       headers = JSON.parse(cmd.headers);
@@ -114,7 +115,7 @@ export async function handleSetHeaders(cmd: any, state: DaemonState): Promise<an
 export async function handleSetOffline(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   try {
-    const { mgr, sessionId } = getSession(state);
+    const { mgr, sessionId } = getSession(cmd, state);
     const offline = Boolean(cmd.offline);
     await setOffline(mgr.client, sessionId, offline);
     return { id, success: true, data: { offline } };

@@ -1,4 +1,5 @@
 import type { DaemonState } from './state.js';
+import { commandSessionId } from './execution-context.js';
 
 type ResolvedElement = {
   objectId: string;
@@ -33,7 +34,7 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const interactionSupport = await inspectInteractionSupport(mgr.client, sessionId);
   if (!interactionSupport.supported) {
     const reason = interactionSupport.reason || 'This page does not support DOM click interactions.';
@@ -68,10 +69,9 @@ export async function handleClick(cmd: any, state: DaemonState): Promise<any> {
       };
     }
     const newPage = await mgr.createNewPage();
-    mgr.setActivePageByTargetId(newPage.targetId);
-    await mgr.navigate(href);
+    await mgr.navigate(href, undefined, newPage.sessionId);
     state.refMap.clear();
-    return { id, success: true, data: { clicked: selector, newTab: true, url: href, tabId: mgr.activeTargetId?.() || '' } };
+    return { id, success: true, data: { clicked: selector, newTab: true, url: href, tabId: newPage.targetId } };
   }
 
   const button = cmd.button || 'left';
@@ -135,7 +135,7 @@ export async function handleFill(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,
@@ -178,7 +178,7 @@ export async function handleType(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,
@@ -209,7 +209,7 @@ export async function handlePress(cmd: any, state: DaemonState): Promise<any> {
   if (!mgr) {
     return { id, success: false, error: 'Browser not launched' };
   }
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const parsed = parseKeyChord(key);
   const params: any = {
     key: parsed.actualKey,
@@ -242,7 +242,7 @@ export async function handleKeydown(cmd: any, state: DaemonState): Promise<any> 
   if (!key || typeof key !== 'string') return { id, success: false, error: "Missing 'key' parameter" };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const parsed = parseKeyChord(key);
   await mgr.client.sendCommand(
     'Input.dispatchKeyEvent',
@@ -267,7 +267,7 @@ export async function handleKeyup(cmd: any, state: DaemonState): Promise<any> {
   if (!key || typeof key !== 'string') return { id, success: false, error: "Missing 'key' parameter" };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const parsed = parseKeyChord(key);
   await mgr.client.sendCommand(
     'Input.dispatchKeyEvent',
@@ -290,7 +290,7 @@ export async function handleKeyboard(cmd: any, state: DaemonState): Promise<any>
   if (!text) return { id, success: false, error: 'Missing keyboard text' };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   if (cmd.subaction === 'insertText') {
     await mgr.client.sendCommand('Input.insertText', { text }, sessionId);
   } else {
@@ -309,7 +309,7 @@ export async function handleHover(cmd: any, state: DaemonState): Promise<any> {
   }
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,
@@ -326,7 +326,7 @@ export async function handleScroll(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   let dx = cmd.x || 0;
   let dy = cmd.y || 0;
@@ -368,7 +368,7 @@ export async function handleFocus(cmd: any, state: DaemonState): Promise<any> {
   if (!selector || typeof selector !== 'string') return { id, success: false, error: "Missing 'selector' parameter" };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,
@@ -395,7 +395,7 @@ export async function handleSelect(cmd: any, state: DaemonState): Promise<any> {
   if (!selector || typeof selector !== 'string') return { id, success: false, error: "Missing 'selector' parameter" };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,
@@ -433,7 +433,7 @@ export async function handleScrollIntoView(cmd: any, state: DaemonState): Promis
   if (!selector || typeof selector !== 'string') return { id, success: false, error: "Missing 'selector' parameter" };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,
@@ -456,7 +456,7 @@ export async function handleDrag(cmd: any, state: DaemonState): Promise<any> {
   if (!source || !target) return { id, success: false, error: "Missing 'source' or 'target' parameter" };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const src = await resolveElementObjectId(mgr.client, sessionId, state.refMap, String(source), state.iframeSessions);
   const dst = await resolveElementObjectId(mgr.client, sessionId, state.refMap, String(target), state.iframeSessions);
   const srcPt = await getElementCenter(mgr.client, src.objectId, src.effectiveSessionId);
@@ -476,7 +476,7 @@ export async function handleUpload(cmd: any, state: DaemonState): Promise<any> {
   if (files.length === 0) return { id, success: false, error: "Missing 'files' parameter" };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,
@@ -493,7 +493,7 @@ export async function handleMouse(cmd: any, state: DaemonState): Promise<any> {
   const id = cmd.id || '';
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const event = cmd.event;
   const button = cmd.button || 'left';
   const buttons = mouseButtonMask(button);
@@ -660,7 +660,7 @@ async function toggleChecked(cmd: any, state: DaemonState, targetChecked: boolea
   if (!selector || typeof selector !== 'string') return { id, success: false, error: "Missing 'selector' parameter" };
   const mgr = state.browser;
   if (!mgr) return { id, success: false, error: 'Browser not launched' };
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const { objectId, effectiveSessionId } = await resolveElementObjectId(
     mgr.client,
     sessionId,

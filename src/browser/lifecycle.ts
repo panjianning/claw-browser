@@ -57,7 +57,8 @@ async function finalizeManagedLaunch(
   state.startDialogHandler();
 
   if (hasProxyAuth && state.browser) {
-    const sessionId = state.browser.activeSessionId();
+    const pages = state.browser.getPages?.() || [];
+    const sessionId = typeof pages[0]?.sessionId === 'string' ? pages[0].sessionId : '';
     await state.browser.client.sendCommand(
       'Fetch.enable',
       {

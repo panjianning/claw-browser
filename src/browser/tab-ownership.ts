@@ -173,8 +173,11 @@ export class TabOwnershipManager {
     this.bindTabToOwner(tabId, ownerId, { createdByOwner: true });
     if (typeof options.initialUrl === 'string' && options.initialUrl.trim().length > 0) {
       try {
-        browser.setActivePageByTargetId(tabId);
-        await browser.navigate(options.initialUrl.trim());
+        const pages = Array.isArray(browser.getPages?.()) ? browser.getPages() : [];
+        const page = pages.find((p: any) => p?.targetId === tabId);
+        if (page?.sessionId) {
+          await browser.navigate(options.initialUrl.trim(), undefined, page.sessionId);
+        }
       } catch {
         // Keep ownership even if eager navigate fails.
       }
@@ -265,4 +268,3 @@ export class TabOwnershipManager {
     }
   }
 }
-

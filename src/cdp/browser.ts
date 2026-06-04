@@ -350,9 +350,16 @@ export class BrowserManager {
     return page.targetId;
   }
 
-  public async navigate(url: string, waitUntil: WaitUntil = WaitUntil.Load): Promise<any> {
+  public async navigate(
+    url: string,
+    waitUntil: WaitUntil = WaitUntil.Load,
+    sessionIdOverride?: string
+  ): Promise<any> {
     return this.withSessionRecovery(async () => {
-      const sessionId = this.activeSessionId();
+      const sessionId =
+        typeof sessionIdOverride === 'string' && sessionIdOverride.trim().length > 0
+          ? sessionIdOverride.trim()
+          : this.activeSessionId();
 
       const result = (await this.client.sendCommand(
         'Page.navigate',
@@ -372,8 +379,8 @@ export class BrowserManager {
         await this.waitForLifecycle(waitUntil, sessionId);
       }
 
-      const pageUrl = await this.getUrl().catch(() => url);
-      const title = await this.getTitle().catch(() => '');
+      const pageUrl = await this.getUrl(sessionId).catch(() => url);
+      const title = await this.getTitle(sessionId).catch(() => '');
 
       // Track visited origin for cross-origin localStorage collection
       try {
@@ -387,7 +394,7 @@ export class BrowserManager {
       }
 
       // Update page info
-      const page = this.pages[this.activePageIndex];
+      const page = this.pages.find((p) => p.sessionId === sessionId) || this.pages[this.activePageIndex];
       if (page) {
         page.url = pageUrl;
         page.title = title;
@@ -479,24 +486,27 @@ export class BrowserManager {
     });
   }
 
-  public async getUrl(): Promise<string> {
-    const result = await this.evaluateSimple('location.href');
+  public async getUrl(sessionIdOverride?: string): Promise<string> {
+    const result = await this.evaluateSimple('location.href', sessionIdOverride);
     return typeof result === 'string' ? result : '';
   }
 
-  public async getTitle(): Promise<string> {
-    const result = await this.evaluateSimple('document.title');
+  public async getTitle(sessionIdOverride?: string): Promise<string> {
+    const result = await this.evaluateSimple('document.title', sessionIdOverride);
     return typeof result === 'string' ? result : '';
   }
 
-  public async getContent(): Promise<string> {
-    const result = await this.evaluateSimple('document.documentElement.outerHTML');
+  public async getContent(sessionIdOverride?: string): Promise<string> {
+    const result = await this.evaluateSimple('document.documentElement.outerHTML', sessionIdOverride);
     return typeof result === 'string' ? result : '';
   }
 
-  public async evaluate(script: string, args?: any): Promise<any> {
+  public async evaluate(script: string, args?: any, sessionIdOverride?: string): Promise<any> {
     return this.withSessionRecovery(async () => {
-      const sessionId = this.activeSessionId();
+      const sessionId =
+        typeof sessionIdOverride === 'string' && sessionIdOverride.trim().length > 0
+          ? sessionIdOverride.trim()
+          : this.activeSessionId();
 
       const result = (await this.client.sendCommand(
         'Runtime.evaluate',
@@ -540,8 +550,8 @@ export class BrowserManager {
     }
   }
 
-  private async evaluateSimple(expression: string): Promise<any> {
-    return this.evaluate(expression);
+  private async evaluateSimple(expression: string, sessionIdOverride?: string): Promise<any> {
+    return this.evaluate(expression, undefined, sessionIdOverride);
   }
 
   public async close(): Promise<void> {

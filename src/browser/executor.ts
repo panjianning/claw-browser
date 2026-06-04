@@ -62,6 +62,38 @@ export function errorResponse(id: string, error: string): any {
   };
 }
 
+function typedErrorResponse(id: string, code: string, message: string): any {
+  return {
+    id,
+    success: false,
+    error: message,
+    code,
+  };
+}
+
+const TAB_BOUND_ACTIONS = new Set([
+  'navigate', 'url', 'title', 'content', 'back', 'forward', 'reload',
+  'snapshot', 'screenshot', 'pdf',
+  'click', 'dblclick', 'fill', 'type', 'press', 'hover', 'scroll', 'select', 'check', 'uncheck', 'focus', 'clear', 'tap', 'drag',
+  'gettext', 'getattribute', 'isvisible', 'isenabled', 'ischecked', 'innertext', 'innerhtml', 'inputvalue', 'boundingbox', 'count',
+  'getbyrole', 'getbytext', 'getbylabel', 'getbyplaceholder', 'getbyalttext', 'getbytitle', 'getbytestid', 'nth', 'find',
+  'wait', 'waitforurl', 'waitforloadstate', 'waitforfunction', 'waitfordownload',
+  'mouse', 'keyboard', 'keydown', 'keyup', 'wheel',
+  'frame', 'mainframe',
+  'cookies_get', 'cookies_set', 'cookies_clear', 'storage_get', 'storage_set', 'storage_clear',
+  'setcontent', 'headers', 'offline',
+  'console', 'errors', 'evaluate', 'evalhandle',
+  'har_start',
+  'route', 'unroute', 'network_requests', 'network_request',
+  'download',
+  'viewport', 'useragent', 'user_agent', 'set_media', 'device', 'timezone', 'locale', 'geolocation', 'permissions',
+  'dialog',
+  'trace_start', 'trace_stop', 'profiler_start', 'profiler_stop',
+  'recording_start', 'recording_stop', 'recording_restart', 'video_start', 'video_stop',
+  'screencast_start', 'screencast_stop',
+  'selectall', 'scrollintoview', 'dispatch', 'highlight', 'setvalue', 'styles', 'bringtofront', 'upload', 'addscript', 'addinitscript', 'addstyle', 'clipboard', 'pause', 'responsebody',
+]);
+
 // ============================================================================
 // Command Execution Router
 // ============================================================================
@@ -74,7 +106,6 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
   const action = cmd.action || '';
   const id = cmd.id || '';
   const ownerId = typeof cmd.ownerId === 'string' ? cmd.ownerId.trim() : '';
-  const isWaitAction = WAIT_ACTIONS.has(action);
   let launchWarning: string | undefined;
 
   // Broadcast command to stream server
@@ -192,7 +223,7 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
       try {
         await state.tabOwnership.enforceTabOwnership(ownerId, cmd.tabId);
       } catch (error: any) {
-        return errorResponse(id, error?.message || String(error));
+        return typedErrorResponse(id, 'OwnerConflict', error?.message || String(error));
       }
     } else {
       const boundTab = state.tabOwnership.getOwnerRootTab(ownerId);
@@ -202,20 +233,24 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     }
   }
 
+  if (!cmd.tabId && TAB_BOUND_ACTIONS.has(action) && ownerId.length === 0) {
+    return typedErrorResponse(
+      id,
+      'TabNotSpecified',
+      'Missing tabId. Provide --tab-id or run inside pipeline/site owner context.'
+    );
+  }
+
   if (cmd.tabId && state.browser && action !== 'tab_switch' && action !== 'tab_list' && action !== 'tab_new') {
     try {
       const resolvedTabId = resolveTabIdReference(state.browser, String(cmd.tabId));
       cmd.tabId = resolvedTabId;
-      if (isWaitAction) {
-        const pages = state.browser.getPages?.() || [];
-        const page = pages.find((p: any) => p?.targetId === resolvedTabId);
-        if (!page?.sessionId) {
-          return errorResponse(id, `Tab not found: ${String(cmd.tabId)}`);
-        }
-        cmd.sessionId = page.sessionId;
-      } else {
-        state.browser.setActivePageByTargetId?.(resolvedTabId);
+      const pages = state.browser.getPages?.() || [];
+      const page = pages.find((p: any) => p?.targetId === resolvedTabId);
+      if (!page?.sessionId) {
+        return typedErrorResponse(id, 'TabSessionNotFound', `Tab session not found: ${String(cmd.tabId)}`);
       }
+      cmd.sessionId = page.sessionId;
     } catch (error: any) {
       return errorResponse(id, error?.message || `Tab not found: ${String(cmd.tabId)}`);
     }
@@ -646,9 +681,8 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
               if (!page?.targetId || typeof page.targetId !== 'string') {
                 throw new Error('Failed to create tab');
               }
-              state.browser.setActivePageByTargetId(page.targetId);
               if (url && typeof url === 'string') {
-                await state.browser.navigate(url);
+                await state.browser.navigate(url, undefined, page.sessionId);
               }
               return page.targetId;
             },
@@ -658,12 +692,20 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
             },
             activateTab: async (tabId: string) => {
               if (!state.browser) throw new Error('Browser not launched');
-              state.browser.setActivePageByTargetId(tabId);
+              const pages = state.browser.getPages?.() || [];
+              const page = pages.find((p: any) => p?.targetId === tabId);
+              if (!page?.sessionId) {
+                throw new Error(`Tab not found: ${tabId}`);
+              }
             },
             navigateTab: async (tabId: string, url: string) => {
               if (!state.browser) throw new Error('Browser not launched');
-              state.browser.setActivePageByTargetId(tabId);
-              await state.browser.navigate(url);
+              const pages = state.browser.getPages?.() || [];
+              const page = pages.find((p: any) => p?.targetId === tabId);
+              if (!page?.sessionId) {
+                throw new Error(`Tab not found: ${tabId}`);
+              }
+              await state.browser.navigate(url, undefined, page.sessionId);
             },
             executeScriptInTab: async (tabId: string, script: string) => {
               if (!state.browser) throw new Error('Browser not launched');
@@ -799,9 +841,8 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
               if (!page?.targetId || typeof page.targetId !== 'string') {
                 throw new Error('Failed to create tab');
               }
-              state.browser.setActivePageByTargetId(page.targetId);
               if (url && typeof url === 'string') {
-                await state.browser.navigate(url);
+                await state.browser.navigate(url, undefined, page.sessionId);
               }
               return page.targetId;
             },
@@ -811,16 +852,33 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
             },
             activateTab: async (tabId: string) => {
               if (!state.browser) throw new Error('Browser not launched');
-              state.browser.setActivePageByTargetId(tabId);
+              const pages = state.browser.getPages?.() || [];
+              const page = pages.find((p: any) => p?.targetId === tabId);
+              if (!page?.sessionId) {
+                throw new Error(`Tab not found: ${tabId}`);
+              }
             },
             navigateTab: async (tabId: string, url: string) => {
               if (!state.browser) throw new Error('Browser not launched');
-              state.browser.setActivePageByTargetId(tabId);
-              await state.browser.navigate(url);
+              const pages = state.browser.getPages?.() || [];
+              const page = pages.find((p: any) => p?.targetId === tabId);
+              if (!page?.sessionId) {
+                throw new Error(`Tab not found: ${tabId}`);
+              }
+              await state.browser.navigate(url, undefined, page.sessionId);
             },
             executeScriptInTab: async (tabId: string, script: string) => {
               if (!state.browser) throw new Error('Browser not launched');
-              const result = await routeAction('evaluate', { id, action: 'evaluate', tabId, script }, state);
+              // Use executeCommand so tab/session routing is resolved consistently.
+              const result = await executeCommand(
+                {
+                  id: `site-eval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  action: 'evaluate',
+                  tabId,
+                  script,
+                },
+                state
+              );
               if (!result?.success) {
                 throw new Error(result?.error || 'Failed to execute script in tab');
               }
@@ -926,11 +984,3 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
       return errorResponse(id, `Unknown action: ${action}`);
   }
 }
-
-const WAIT_ACTIONS = new Set([
-  'wait',
-  'waitforurl',
-  'waitforloadstate',
-  'waitforfunction',
-  'waitfordownload',
-]);

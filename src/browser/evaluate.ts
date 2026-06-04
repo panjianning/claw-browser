@@ -1,4 +1,5 @@
 import type { DaemonState } from './state.js';
+import { commandSessionId } from './execution-context.js';
 
 /**
  * JavaScript evaluation handlers.
@@ -29,7 +30,8 @@ export async function handleEvaluate(cmd: any, state: DaemonState): Promise<any>
   }
 
   try {
-    const result = await mgr.evaluate(script);
+    const sessionId = commandSessionId(cmd, mgr);
+    const result = await mgr.evaluate(script, undefined, sessionId);
     return { id, success: true, data: { result } };
   } catch (error: any) {
     return {
@@ -53,7 +55,7 @@ export async function handleEvalHandle(cmd: any, state: DaemonState): Promise<an
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   try {
     const result = await mgr.client.sendCommand(
       'Runtime.evaluate',

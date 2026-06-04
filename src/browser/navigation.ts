@@ -1,4 +1,5 @@
 import type { DaemonState } from './state.js';
+import { commandSessionId, commandTabId } from './execution-context.js';
 
 /**
  * Navigation action handlers
@@ -44,7 +45,7 @@ export async function handleNavigate(cmd: any, state: DaemonState): Promise<any>
   const waitUntilValue = cmd.waitUntil || 'load';
 
   // Origin-scoped header injection
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   if (state.originHeaders.size > 0) {
     try {
       const urlObj = new URL(url);
@@ -63,9 +64,9 @@ export async function handleNavigate(cmd: any, state: DaemonState): Promise<any>
     }
   }
 
-  await mgr.navigate(url, waitUntilValue);
-  const newUrl = await mgr.getUrl().catch(() => url);
-  const title = await mgr.getTitle().catch(() => '');
+  await mgr.navigate(url, waitUntilValue, sessionId);
+  const newUrl = await mgr.getUrl(sessionId).catch(() => url);
+  const title = await mgr.getTitle(sessionId).catch(() => '');
   state.refMap.clear();
 
   // Track visited origin for state persistence
@@ -79,7 +80,7 @@ export async function handleNavigate(cmd: any, state: DaemonState): Promise<any>
     // Invalid URL, skip tracking
   }
 
-  return { id, success: true, data: { url: newUrl, title, tabId: mgr.activeTargetId?.() || '' } };
+  return { id, success: true, data: { url: newUrl, title, tabId: commandTabId(cmd, mgr) } };
 }
 
 export async function handleUrl(cmd: any, state: DaemonState): Promise<any> {
@@ -96,7 +97,8 @@ export async function handleUrl(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const url = await mgr.getUrl();
+  const sessionId = commandSessionId(cmd, mgr);
+  const url = await mgr.getUrl(sessionId);
   return { id, success: true, data: { url } };
 }
 
@@ -108,10 +110,10 @@ export async function handleTitle(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const targetId = commandTabId(cmd, mgr);
   const result = await mgr.client.sendCommand(
     'Target.getTargetInfo',
-    { targetId: mgr.activeTargetId?.() || '' },
+    { targetId },
     undefined
   );
 
@@ -136,7 +138,7 @@ export async function handleContent(cmd: any, state: DaemonState): Promise<any> 
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   const result = await mgr.client.sendCommand(
     'Runtime.evaluate',
     {
@@ -167,9 +169,10 @@ export async function handleBack(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  await mgr.evaluate('history.back()', undefined);
+  const sessionId = commandSessionId(cmd, mgr);
+  await mgr.evaluate('history.back()', undefined, sessionId);
   await new Promise((resolve) => setTimeout(resolve, 500));
-  const url = await mgr.getUrl().catch(() => '');
+  const url = await mgr.getUrl(sessionId).catch(() => '');
   state.refMap.clear();
 
   return { id, success: true, data: { url } };
@@ -192,9 +195,10 @@ export async function handleForward(cmd: any, state: DaemonState): Promise<any> 
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  await mgr.evaluate('history.forward()', undefined);
+  const sessionId = commandSessionId(cmd, mgr);
+  await mgr.evaluate('history.forward()', undefined, sessionId);
   await new Promise((resolve) => setTimeout(resolve, 500));
-  const url = await mgr.getUrl().catch(() => '');
+  const url = await mgr.getUrl(sessionId).catch(() => '');
   state.refMap.clear();
 
   return { id, success: true, data: { url } };
@@ -217,7 +221,7 @@ export async function handleReload(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   await mgr.client.sendCommand('Page.reload', {}, sessionId);
 
   // Wait for load event
@@ -234,7 +238,7 @@ export async function handleReload(cmd: any, state: DaemonState): Promise<any> {
   });
 
   await eventPromise;
-  const url = await mgr.getUrl().catch(() => '');
+  const url = await mgr.getUrl(sessionId).catch(() => '');
   state.refMap.clear();
 
   return { id, success: true, data: { url } };

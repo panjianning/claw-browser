@@ -313,40 +313,135 @@ async function handleConnection(
 function createSerializedExecutor(
   state: DaemonState
 ): (cmd: any) => Promise<any> {
-  let tail: Promise<void> = Promise.resolve();
+  let globalTail: Promise<void> = Promise.resolve();
+  const keyedTails = new Map<string, Promise<void>>();
+  let activeNonGlobal = 0;
+  const idleWaiters: Array<() => void> = [];
+
+  const waitForNonGlobalIdle = async (): Promise<void> => {
+    if (activeNonGlobal === 0) {
+      return;
+    }
+    await new Promise<void>((resolve) => {
+      idleWaiters.push(resolve);
+    });
+  };
+
+  const resolveNonGlobalIdleIfNeeded = (): void => {
+    if (activeNonGlobal !== 0) {
+      return;
+    }
+    while (idleWaiters.length > 0) {
+      const waiter = idleWaiters.shift();
+      waiter?.();
+    }
+  };
 
   return async (cmd: any): Promise<any> => {
-    const action = typeof cmd?.action === 'string' ? cmd.action : '';
-    if (NON_BLOCKING_ACTIONS.has(action)) {
-      // Allow wait-family commands to run concurrently so they don't block the
-      // entire session command queue.
-      return executeCommand(cmd, state);
+    const key = schedulerKeyForCommand(cmd);
+
+    if (key === 'global') {
+      const previousGlobal = globalTail;
+      let releaseGlobal!: () => void;
+      globalTail = new Promise<void>((resolve) => {
+        releaseGlobal = resolve;
+      });
+
+      await previousGlobal;
+      await waitForNonGlobalIdle();
+      try {
+        return await executeCommand(cmd, state);
+      } finally {
+        releaseGlobal();
+      }
     }
 
-    const previous = tail;
-    let release!: () => void;
-
-    tail = new Promise<void>((resolve) => {
-      release = resolve;
+    const previousGlobal = globalTail;
+    const previousForKey = keyedTails.get(key) || Promise.resolve();
+    let releaseKey!: () => void;
+    const currentKeyTail = new Promise<void>((resolve) => {
+      releaseKey = resolve;
     });
+    keyedTails.set(key, currentKeyTail);
 
-    await previous;
+    await Promise.all([previousGlobal, previousForKey]);
+
+    activeNonGlobal += 1;
     try {
       return await executeCommand(cmd, state);
     } finally {
-      release();
+      activeNonGlobal = Math.max(0, activeNonGlobal - 1);
+      resolveNonGlobalIdleIfNeeded();
+      releaseKey();
+      if (keyedTails.get(key) === currentKeyTail) {
+        keyedTails.delete(key);
+      }
     }
   };
 }
 
-const NON_BLOCKING_ACTIONS = new Set([
-  'pipeline',
-  'site',
+function schedulerKeyForCommand(cmd: any): string {
+  const action = typeof cmd?.action === 'string' ? cmd.action : '';
+  const siteAction = typeof cmd?.siteAction === 'string' ? cmd.siteAction.trim() : '';
+  const pipelineAction = typeof cmd?.pipelineAction === 'string' ? cmd.pipelineAction.trim() : '';
+  const tabId = typeof cmd?.tabId === 'string' ? cmd.tabId.trim() : '';
+  const ownerId = typeof cmd?.ownerId === 'string' ? cmd.ownerId.trim() : '';
+  const sessionId = typeof cmd?.sessionId === 'string' ? cmd.sessionId.trim() : '';
+
+  if (GLOBAL_ACTIONS.has(action)) {
+    return 'global';
+  }
+
+  if (READ_ONLY_ACTIONS.has(action)) {
+    return `read:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  if (tabId) {
+    return `tab:${tabId}`;
+  }
+
+  if (ownerId) {
+    return `owner:${ownerId}`;
+  }
+
+  // Top-level site/pipeline run commands acquire their owner/tab inside executeCommand,
+  // so they must not collapse to a single session key before that happens.
+  if ((action === 'site' && siteAction === 'run') || (action === 'pipeline' && pipelineAction === 'run')) {
+    return `run:${Date.now()}:${Math.random().toString(36).slice(2, 8)}`;
+  }
+
+  if (sessionId) {
+    return `session:${sessionId}`;
+  }
+
+  return 'global';
+}
+
+const GLOBAL_ACTIONS = new Set([
+  '',
+  'launch',
+  'close',
+  'session_status',
+  'stream_enable',
+  'stream_disable',
+  'stream_status',
+  'state_list',
+  'state_show',
+  'state_clear',
+  'state_clean',
+  'state_rename',
+  'device_list',
+  'credentials_set',
+  'credentials_get',
+  'credentials_delete',
+  'credentials_list',
+  'auth_save',
+  'auth_show',
+  'auth_delete',
+  'auth_list',
+]);
+
+const READ_ONLY_ACTIONS = new Set([
   'tab_list',
   'listTabs',
-  'wait',
-  'waitforurl',
-  'waitforloadstate',
-  'waitforfunction',
-  'waitfordownload',
 ]);

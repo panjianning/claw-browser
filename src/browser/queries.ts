@@ -1,4 +1,5 @@
 import type { DaemonState } from './state.js';
+import { commandSessionId } from './execution-context.js';
 
 /**
  * Element query action handlers
@@ -17,7 +18,7 @@ export async function handleGettext(cmd: any, state: DaemonState): Promise<any> 
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   try {
     const text = await getElementText(
@@ -27,7 +28,7 @@ export async function handleGettext(cmd: any, state: DaemonState): Promise<any> 
       selector,
       state.iframeSessions
     );
-    const url = await mgr.getUrl().catch(() => '');
+    const url = await mgr.getUrl(sessionId).catch(() => '');
     return { id, success: true, data: { text, origin: url } };
   } catch (error: any) {
     return { id, success: false, error: error.message || String(error) };
@@ -50,7 +51,7 @@ export async function handleGetattribute(cmd: any, state: DaemonState): Promise<
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   try {
     const value = await getElementAttribute(
@@ -61,7 +62,7 @@ export async function handleGetattribute(cmd: any, state: DaemonState): Promise<
       attribute,
       state.iframeSessions
     );
-    const url = await mgr.getUrl().catch(() => '');
+    const url = await mgr.getUrl(sessionId).catch(() => '');
     return { id, success: true, data: { value, origin: url } };
   } catch (error: any) {
     return { id, success: false, error: error.message || String(error) };
@@ -80,7 +81,7 @@ export async function handleIsvisible(cmd: any, state: DaemonState): Promise<any
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   try {
     const visible = await isElementVisible(
@@ -90,7 +91,7 @@ export async function handleIsvisible(cmd: any, state: DaemonState): Promise<any
       selector,
       state.iframeSessions
     );
-    const url = await mgr.getUrl().catch(() => '');
+    const url = await mgr.getUrl(sessionId).catch(() => '');
     return { id, success: true, data: { visible, origin: url } };
   } catch (error: any) {
     return { id, success: false, error: error.message || String(error) };
@@ -109,7 +110,7 @@ export async function handleIsenabled(cmd: any, state: DaemonState): Promise<any
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   try {
     const enabled = await isElementEnabled(
@@ -119,7 +120,7 @@ export async function handleIsenabled(cmd: any, state: DaemonState): Promise<any
       selector,
       state.iframeSessions
     );
-    const url = await mgr.getUrl().catch(() => '');
+    const url = await mgr.getUrl(sessionId).catch(() => '');
     return { id, success: true, data: { enabled, origin: url } };
   } catch (error: any) {
     return { id, success: false, error: error.message || String(error) };
@@ -138,7 +139,7 @@ export async function handleIschecked(cmd: any, state: DaemonState): Promise<any
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   try {
     const checked = await isElementChecked(
@@ -148,7 +149,7 @@ export async function handleIschecked(cmd: any, state: DaemonState): Promise<any
       selector,
       state.iframeSessions
     );
-    const url = await mgr.getUrl().catch(() => '');
+    const url = await mgr.getUrl(sessionId).catch(() => '');
     return { id, success: true, data: { checked, origin: url } };
   } catch (error: any) {
     return { id, success: false, error: error.message || String(error) };
@@ -167,7 +168,7 @@ export async function handleCount(cmd: any, state: DaemonState): Promise<any> {
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
 
   try {
     const count = await countElements(mgr.client, sessionId, selector);
@@ -191,7 +192,7 @@ export async function handleInnerhtml(cmd: any, state: DaemonState): Promise<any
   if (!mgr) {
     return { id, success: false, error: 'Browser not launched' };
   }
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   try {
     const { objectId, effectiveSessionId } = await resolveElementObjectId(
       mgr.client,
@@ -226,7 +227,7 @@ export async function handleInputvalue(cmd: any, state: DaemonState): Promise<an
   if (!mgr) {
     return { id, success: false, error: 'Browser not launched' };
   }
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   try {
     const { objectId, effectiveSessionId } = await resolveElementObjectId(
       mgr.client,
@@ -262,7 +263,7 @@ export async function handleBoundingbox(cmd: any, state: DaemonState): Promise<a
   if (!mgr) {
     return { id, success: false, error: 'Browser not launched' };
   }
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   try {
     const { objectId, effectiveSessionId } = await resolveElementObjectId(
       mgr.client,
@@ -300,7 +301,7 @@ export async function handleStyles(cmd: any, state: DaemonState): Promise<any> {
   if (!mgr) {
     return { id, success: false, error: 'Browser not launched' };
   }
-  const sessionId = mgr.activeSessionId?.() || '';
+  const sessionId = commandSessionId(cmd, mgr);
   try {
     const { objectId, effectiveSessionId } = await resolveElementObjectId(
       mgr.client,
