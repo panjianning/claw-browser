@@ -145,7 +145,10 @@ Session 隔离粒度包括：
 
 ## 4.2 自定义 profile
 
-传入 `--profile <path>` 后，Chrome 使用该目录作为 `--user-data-dir`。
+传入 `--profile <path-or-name>` 后：
+
+- 若参数看起来像路径（包含 `/`、`./`、`../`、`~` 或绝对路径），Chrome 直接使用该路径作为 `--user-data-dir`（`~` 会展开）。
+- 若参数是纯名称（例如 `profile-xhs`），会映射到 `~/.claw-browser/browser/<name>`。
 
 建议：
 

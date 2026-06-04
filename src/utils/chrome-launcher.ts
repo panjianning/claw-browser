@@ -44,6 +44,26 @@ function resolveDefaultUserDataDir(): string {
   return path.join(homedir(), '.claw-browser', 'browser', session);
 }
 
+function resolveProfileUserDataDir(profile: string): string {
+  const trimmed = profile.trim();
+  if (!trimmed) return resolveDefaultUserDataDir();
+
+  // Expand tilde for explicit home-relative paths.
+  const expanded = trimmed.replace(/^~/, process.env.HOME || process.env.USERPROFILE || '');
+  const looksLikePath =
+    path.isAbsolute(expanded) ||
+    expanded.startsWith('.') ||
+    expanded.includes('/') ||
+    expanded.includes('\\');
+
+  // Treat plain names as managed profile names under ~/.claw-browser/browser.
+  if (!looksLikePath) {
+    return path.join(homedir(), '.claw-browser', 'browser', expanded);
+  }
+
+  return expanded;
+}
+
 function findAvailablePort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = net.createServer();
@@ -112,8 +132,7 @@ async function buildChromeArgs(options: LaunchOptions): Promise<ChromeArgs> {
 
   let userDataDir: string;
   if (options.profile) {
-    // Expand tilde
-    userDataDir = options.profile.replace(/^~/, process.env.HOME || process.env.USERPROFILE || '');
+    userDataDir = resolveProfileUserDataDir(options.profile);
   } else {
     // Use a persistent default profile for better session continuity.
     userDataDir = resolveDefaultUserDataDir();

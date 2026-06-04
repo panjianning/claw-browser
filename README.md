@@ -106,8 +106,10 @@ Key files:
 
 Notes:
 
-- `--profile <path>` sets Chrome `--user-data-dir` to the provided path.
-- Without `--profile`, `claw-browser` now uses a persistent per-session profile at `~/.claw-browser/browser/<session>`.
+- `--profile <path-or-name>` sets Chrome `--user-data-dir`.
+- If it looks like a path (`/`, `./`, `../`, `~`, absolute path), it is used as-is (with `~` expansion).
+- If it is a plain name (for example `profile-xhs`), it is mapped to `~/.claw-browser/browser/<name>`.
+- Without `--profile`, `claw-browser` uses a persistent per-session profile at `~/.claw-browser/browser/<session>`.
 
 ## Site Adapters
 
