@@ -65,7 +65,11 @@ export async function handleTabList(cmd: any, state: DaemonState): Promise<any> 
     return { id, success: false, error: 'Browser not launched' };
   }
   await syncTabsIfSupported(mgr);
-  return { id, success: true, data: { tabs: mgr.tabList() } };
+  const tabs = mgr.tabList().map((tab: any) => ({
+    ...tab,
+    ownerId: state.tabOwnership.ownerOf(String(tab.id || tab.tabId || '')),
+  }));
+  return { id, success: true, data: { tabs } };
 }
 
 export async function handleTabNew(cmd: any, state: DaemonState): Promise<any> {

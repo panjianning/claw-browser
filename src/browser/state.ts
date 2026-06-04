@@ -1,6 +1,7 @@
 import { EventEmitter } from 'events';
 import type { CdpClient } from '../cdp/client.js';
 import { EventTracker, DomainFilter } from '../cdp/network.js';
+import { TabOwnershipManager } from './tab-ownership.js';
 
 // ============================================================================
 // Type Definitions
@@ -232,6 +233,9 @@ export class DaemonState extends EventEmitter {
   siteRuntime: any | null = null;
   pipelineRuntime: any | null = null;
 
+  // Unified tab ownership tracking for pipeline/site runs.
+  tabOwnership: TabOwnershipManager;
+
   // Browser engine name
   engine: string;
 
@@ -273,6 +277,8 @@ export class DaemonState extends EventEmitter {
 
     // Load confirm actions from env (placeholder for now)
     this.confirmActions = null;
+
+    this.tabOwnership = new TabOwnershipManager(() => this.browser);
   }
 
   /**

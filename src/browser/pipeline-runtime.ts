@@ -47,8 +47,10 @@ type PipelineRunStepState = {
 
 type PipelineRunState = {
   runId: string;
+  ownerId: string;
   pipelineName: string;
   sessionId?: string;
+  tabId?: string;
   callerWorkingDir: string;
   workDir: string;
   status: RunStatus;
@@ -184,12 +186,22 @@ export type PipelineActionRequest = {
 };
 
 type PipelineRuntimeContext = {
+  acquireRunTab: (input: {
+    ownerId: string;
+    preferredTabId?: string;
+    initialUrl?: string;
+  }) => Promise<{
+    tabId: string;
+    created: boolean;
+  }>;
+  releaseRunOwner: (ownerId: string) => Promise<void>;
   executeSiteAction: (input: SiteActionRequest) => Promise<unknown>;
   executeBrowserAction: (input: {
     action: string;
     tabId?: string;
     workingDir?: string;
     sessionId?: string;
+    ownerId?: string;
     params?: Record<string, unknown>;
   }) => Promise<{
     success: boolean;
@@ -393,7 +405,9 @@ export class PipelineRuntime {
 
     const base = {
       runId: run.runId,
+      ownerId: run.ownerId,
       pipelineName: run.pipelineName,
+      tabId: run.tabId,
       workDir: run.workDir,
       status: run.status,
       startedAt: run.startedAt,
@@ -489,8 +503,10 @@ export class PipelineRuntime {
 
     const run: PipelineRunState = {
       runId,
+      ownerId: runId,
       pipelineName: loaded.meta.name,
       sessionId: typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : undefined,
+      tabId: undefined,
       callerWorkingDir: workingDir,
       workDir,
       status: 'running',
@@ -505,6 +521,15 @@ export class PipelineRuntime {
     };
 
     this.runs.set(runId, run);
+    const preferredTabId = typeof mergedInput.tabId === 'string' ? mergedInput.tabId.trim() : '';
+    const initialUrl = typeof mergedInput.entryUrl === 'string' ? mergedInput.entryUrl.trim() : '';
+    const acquired = await this.context.acquireRunTab({
+      ownerId: run.ownerId,
+      preferredTabId: preferredTabId || undefined,
+      initialUrl: initialUrl || undefined,
+    });
+    run.tabId = acquired.tabId;
+
     const promise = this.executeRun(loaded, run, workDir);
     this.runPromises.set(runId, promise);
     void promise.finally(() => {
@@ -552,6 +577,7 @@ export class PipelineRuntime {
       }
     } finally {
       run.currentChild = null;
+      await this.context.releaseRunOwner(run.ownerId).catch(() => undefined);
       const statePath = join(workDir, 'run-state.json');
       writeFileSync(statePath, this.safeStringify(this.toRunStatus(run, 'full')), 'utf-8');
     }
@@ -611,10 +637,11 @@ export class PipelineRuntime {
           try {
             const result = await this.context.executeBrowserAction({
               action,
-              tabId: params?.tabId,
+              tabId: params?.tabId || run.tabId,
               params: params?.params || {},
               workingDir: run.callerWorkingDir,
               sessionId: run.sessionId,
+              ownerId: run.ownerId,
             });
             if (!result.success) {
               throw new Error(result.error || `browser action failed: ${action}`);
@@ -648,7 +675,8 @@ export class PipelineRuntime {
               args,
               workingDir: run.callerWorkingDir,
               sessionId: run.sessionId,
-              tabId: typeof args?.tabId === 'string' ? String(args.tabId) : undefined,
+              ownerId: run.ownerId,
+              tabId: typeof args?.tabId === 'string' ? String(args.tabId) : run.tabId,
               entryUrl: typeof args?.entryUrl === 'string' ? String(args.entryUrl) : undefined,
             });
             finishStep(step, 'completed', { summary: `site: ${name}` });
@@ -988,15 +1016,7 @@ export class PipelineRuntime {
           siteExample: (info as any).example,
         },
         run: async (ctx) => {
-          const result = await this.context.executeSiteAction({
-            action: 'run',
-            name: adapter,
-            args: ctx.input,
-            workingDir,
-            sessionId: undefined,
-            tabId: typeof ctx.input.tabId === 'string' ? String(ctx.input.tabId) : undefined,
-            entryUrl: typeof ctx.input.entryUrl === 'string' ? String(ctx.input.entryUrl) : undefined,
-          });
+          const result = await ctx.site.run(adapter, ctx.input);
           return { adapter, result };
         },
       };

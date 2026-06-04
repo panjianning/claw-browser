@@ -168,11 +168,18 @@ Session 隔离粒度包括：
 - “账号态隔离”放到 profile 维度
 - 一般采用 `1 Session : 1 Profile` 映射
 
+## 4.4 Pipeline/Site 并发隔离（新版）
+
+- `pipeline run` 与 `site run` 统一使用 run 级 tab owner（owner = pipeline `runId`）。
+- 同一 session 内允许多 pipeline 并发，但每个 run 只能操作自己 owner 的 tab。
+- run 内新开的子 tab 会继承 opener tab 的 owner，避免并发时 tab 串扰。
+- `tab list` 会返回 `ownerId` 字段，便于观察占用关系。
+
 ---
 
 ## 5. Site 机制
 
-`site` 是把“领域任务脚本”封装为可复用适配器，并在执行时做 domain 级 tab 资源调度。
+`site` 是把“领域任务脚本”封装为可复用适配器，并复用 pipeline 运行时 owner 机制。
 
 ## 5.1 适配器发现与来源
 
@@ -204,68 +211,33 @@ Session 隔离粒度包括：
 2. 组装 JS 脚本
 3. 通过 `evaluate` 下发到目标 tab 执行
 
-## 5.3 Domain Tab Pool 设计
+## 5.3 Run Owner 模型
 
-当 adapter 声明 `domain` 且未显式传 `--tab-id` 时，进入 domain tab 池调度。
+site 与 pipeline 统一走 run owner（owner = pipeline `runId`）：
 
-目标：
+- 一个 tab 同时只属于一个 owner
+- owner 只能操作自己拥有的 tab
+- 无 `tabId` 时默认绑定到 owner root tab
 
-- 优先复用已打开且空闲的同域 tab
-- 无可复用 tab 时，按上限新建
-- 到达上限时排队等待
+## 5.4 子 Tab 继承
 
-默认每域上限：
+当目标页通过 `window.open` / `_blank` 打开新 tab：
 
-- `2`（可用 `CLAW_BROWSER_SITE_MAX_TABS_PER_DOMAIN` 覆盖）
+- 若 opener tab 属于 owner，则新 tab 自动继承该 owner
+- 避免 site/pipeline 执行期间子 tab 被其他并发任务抢占
 
-## 5.4 锁与状态文件
+## 5.5 生命周期
 
-目录：
+1. pipeline/site 执行启动时创建 owner 并绑定 root tab
+2. 执行过程中所有 browser/site 操作受 owner 约束
+3. 结束后释放 owner（默认仅解绑，不自动关 tab）
 
-- `~/.claw-browser/site-tab-pool/`
+## 5.6 与 `--tab-id` 的关系
 
-文件：
+如果传了 `--tab-id`，仍会先校验 owner：
 
-- `<session>.json` 记录 domain queue 与 leases
-- `<session>.lock` 目录锁，保护状态更新原子性
-
-关键字段：
-
-- `queue`: lease 请求队列（FIFO）
-- `leases`: 已持有 tab 的租约，包含 `pid`, `tabId`, `createdTemp`
-
-并发安全点：
-
-- 所有 acquire/release 都在 `withPoolLock` 内执行
-- 启动时会清理死进程 lease，防止僵尸占位
-
-## 5.5 acquire 流程
-
-简化流程：
-
-1. 请求入队
-2. 仅队首请求有资格继续
-3. 查找同域可复用 tab（排除当前 leases 占用）
-4. 若可复用则直接分配 lease
-5. 若不可复用且未达上限，创建新 tab 并分配 lease
-6. 若达上限，保留队列并重试等待
-
-创建临时 tab 时，当前实现会短暂 sleep 以提升目标站点稳定性。
-
-## 5.6 release 流程
-
-释放时：
-
-- 从 leases 移除
-- 从 queue 清理对应 leaseId
-- 若该 lease 为 `createdTemp=true`，会自动关闭对应 tab
-- domain 下无 lease 且无排队时，清理该 domain 节点
-
-## 5.7 与 `--tab-id` 的关系
-
-如果传了 `--tab-id`，`site` 会直接在该 tab 上执行，不进入 domain 池。
-
-这允许你在更高层调度器中自行管理 tab 生命周期。
+- 目标 tab 无 owner 时，会绑定到当前 owner
+- 目标 tab 属于其他 owner 时，命令会被拒绝
 
 ---
 
@@ -283,10 +255,10 @@ Session 隔离粒度包括：
 - 每条命令带 `--tab-id` 精确路由
 - `wait` 可并发，不再卡住整个 Session
 
-## 模式 C：site 驱动的同域池化
+## 模式 C：site 驱动的 owner 隔离
 
 - 对同域任务使用 `site <adapter>`
-- 让 domain tab pool 自动复用、排队、限流
+- 依托 owner 机制在同一 session 内并发，避免 tab 串扰
 - 适合批量同站点任务
 
 ---
@@ -307,13 +279,13 @@ Session 隔离粒度包括：
 
 在并发命令流中，不建议依赖“当前 active tab”作为隐式路由。
 
-## 7.3 site 卡在排队
+## 7.3 并发任务 tab 冲突
 
 检查：
 
-- `CLAW_BROWSER_SITE_MAX_TABS_PER_DOMAIN` 是否过小
-- 是否存在长时间不释放的任务
-- 进程是否异常退出导致 lease 未清理（一般会被下次清理回收）
+- 是否在 pipeline/site 上下文外直接发了未带 owner 的 browser 命令
+- 是否手动指定了属于其他 owner 的 `tabId`
+- 用 `tab list` 查看 `ownerId` 是否与当前 run 一致
 
 ## 7.4 profile 冲突
 

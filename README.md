@@ -110,6 +110,8 @@ Notes:
 - If it looks like a path (`/`, `./`, `../`, `~`, absolute path), it is used as-is (with `~` expansion).
 - If it is a plain name (for example `profile-xhs`), it is mapped to `~/.claw-browser/browser/<name>`.
 - Without `--profile`, `claw-browser` uses a persistent per-session profile at `~/.claw-browser/browser/<session>`.
+- Pipeline/site run isolation now uses per-run tab ownership (owner = pipeline `runId`) inside one session.
+- `tab list` shows `ownerId`; owned tabs are reserved while that run is active.
 
 ## Site Adapters
 
@@ -135,23 +137,16 @@ Community adapter directory:
 
 * Inspired by [bb-browser](https://github.com/epiral/bb-browser/)
 
-### Domain Tab Pooling for `site`
+### Pipeline/Site Tab Ownership
 
-For adapters with a declared `domain`, `claw-browser` now manages per-domain tab leases:
+`pipeline run` and `site run` share the same tab ownership model:
 
-- Reuse an idle tab for that domain first.
-- If all leased tabs are busy, open a new tab.
-- Enforce a per-domain max tab count.
-- If at max, wait in a queue.
-- Auto-close tabs created temporarily for the adapter when the run finishes.
+- Owner ID is the pipeline run ID.
+- Owned tabs are reserved for that run.
+- Child tabs opened from an owned tab inherit the same owner.
+- `tab list` includes `ownerId` so you can inspect current ownership.
 
-Configure max tabs per domain:
-
-```bash
-CLAW_BROWSER_SITE_MAX_TABS_PER_DOMAIN=3 claw-browser site xhs/note --note_id 123
-```
-
-Default: `2`.
+This allows high concurrency inside one session without tab contention.
 
 ## Compatibility Notes
 

@@ -340,6 +340,10 @@ function createSerializedExecutor(
 }
 
 const NON_BLOCKING_ACTIONS = new Set([
+  'pipeline',
+  'site',
+  'tab_list',
+  'listTabs',
   'wait',
   'waitforurl',
   'waitforloadstate',

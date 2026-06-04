@@ -244,8 +244,10 @@ function printHumanSuccess(command: { action?: string }, response: { data?: any 
       const label = typeof tab.label === 'string' && tab.label.length > 0 ? tab.label : '';
       const title = typeof tab.title === 'string' && tab.title.length > 0 ? tab.title : 'Untitled';
       const url = typeof tab.url === 'string' ? tab.url : '';
+      const ownerId = typeof tab.ownerId === 'string' ? tab.ownerId.trim() : '';
       const labelPart = label ? ` [${label}]` : '';
-      console.log(`${marker}${labelPart} ${displayTabId(tabId)} ${title} - ${url}`);
+      const ownerPart = ownerId ? ` owner=${ownerId}` : '';
+      console.log(`${marker}${labelPart} ${displayTabId(tabId)} ${title} - ${url}${ownerPart}`);
     }
     return;
   }

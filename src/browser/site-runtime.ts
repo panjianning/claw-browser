@@ -1,13 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { spawnSync } from 'child_process';
 import { homedir } from 'os';
 import { join, relative } from 'path';
 
 const COMMUNITY_REPO = 'https://github.com/panjianning/claw-sites.git';
-const DEFAULT_SITE_DOMAIN_MAX_TABS = 2;
-const SITE_POOL_LOCK_TIMEOUT_MS = 60_000;
-const SITE_POOL_RETRY_MS = 120;
-const SITE_POOL_STALE_LOCK_MAX_AGE_MS = 5 * 60_000;
 
 type SiteSource = 'local' | 'community';
 
@@ -55,6 +51,7 @@ export type SiteActionRequest = {
   action: 'list' | 'search' | 'info' | 'update' | 'run';
   workingDir?: string;
   sessionId?: string;
+  ownerId?: string;
   name?: string;
   query?: string;
   mode?: 'auto' | 'pull' | 'clone';
@@ -62,37 +59,6 @@ export type SiteActionRequest = {
   argv?: string[];
   tabId?: string;
   entryUrl?: string;
-};
-
-type DomainLease = {
-  leaseId: string;
-  pid: number;
-  tabId: string;
-  createdTemp: boolean;
-  acquiredAt: number;
-};
-
-type DomainPoolEntry = {
-  queue: string[];
-  leases: DomainLease[];
-};
-
-type DomainPoolState = {
-  version: 1;
-  domains: Record<string, DomainPoolEntry>;
-};
-
-type PoolLockOwner = {
-  pid: number;
-  acquiredAt: number;
-};
-
-type SiteTabLease = {
-  session: string;
-  domain: string;
-  leaseId: string;
-  tabId: string;
-  createdTemp: boolean;
 };
 
 function getClawBrowserDir(): string {
@@ -115,21 +81,6 @@ function getGemCommunitySitesDir(): string {
   return join(homedir(), '.claw-browser', 'sites', 'community');
 }
 
-function getSitePoolDir(): string {
-  return join(getClawBrowserDir(), 'site-tab-pool');
-}
-
-function getSitePoolStatePath(session: string): string {
-  return join(getSitePoolDir(), `${session}.json`);
-}
-
-function getSitePoolLockPath(session: string): string {
-  return join(getSitePoolDir(), `${session}.lock`);
-}
-
-function getSitePoolLockOwnerPath(lockPath: string): string {
-  return join(lockPath, 'owner.json');
-}
 
 function normalizeSiteName(filePath: string, baseDir: string): string {
   return relative(baseDir, filePath).replace(/\\/g, '/').replace(/\.js$/i, '');
@@ -141,156 +92,16 @@ function domainMatches(host: string, domain: string): boolean {
   return loweredHost === loweredDomain || loweredHost.endsWith(`.${loweredDomain}`);
 }
 
-function processAlive(pid: number): boolean {
-  if (!Number.isInteger(pid) || pid <= 0) return false;
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function getMaxTabsPerDomain(): number {
-  const raw = process.env.CLAW_BROWSER_SITE_MAX_TABS_PER_DOMAIN;
-  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  if (Number.isInteger(parsed) && parsed > 0) return parsed;
-  return DEFAULT_SITE_DOMAIN_MAX_TABS;
-}
-
-function getStaleLockMaxAgeMs(): number {
-  const raw = process.env.CLAW_BROWSER_SITE_LOCK_STALE_MS;
-  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN;
-  if (Number.isInteger(parsed) && parsed > 0) return parsed;
-  return SITE_POOL_STALE_LOCK_MAX_AGE_MS;
-}
-
-function ensurePoolDirs(): void {
-  mkdirSync(getSitePoolDir(), { recursive: true });
-}
-
-function defaultPoolState(): DomainPoolState {
-  return { version: 1, domains: {} };
-}
-
-function loadPoolState(session: string): DomainPoolState {
-  const statePath = getSitePoolStatePath(session);
-  try {
-    const raw = readFileSync(statePath, 'utf-8');
-    const parsed = JSON.parse(raw) as Partial<DomainPoolState>;
-    if (!parsed || typeof parsed !== 'object' || typeof parsed.domains !== 'object') {
-      return defaultPoolState();
-    }
-    return { version: 1, domains: parsed.domains || {} };
-  } catch {
-    return defaultPoolState();
-  }
-}
-
-function savePoolState(session: string, state: DomainPoolState): void {
-  ensurePoolDirs();
-  writeFileSync(getSitePoolStatePath(session), JSON.stringify(state), 'utf-8');
-}
-
-function cleanupPoolState(state: DomainPoolState): void {
-  for (const [domain, entry] of Object.entries(state.domains)) {
-    const aliveLeases = entry.leases.filter((lease) => processAlive(lease.pid));
-    const aliveLeaseIds = new Set(aliveLeases.map((lease) => lease.leaseId));
-    const dedupQueue: string[] = [];
-    for (const leaseId of entry.queue) {
-      if (aliveLeaseIds.has(leaseId) && !dedupQueue.includes(leaseId)) {
-        dedupQueue.push(leaseId);
-      }
-    }
-    entry.leases = aliveLeases;
-    entry.queue = dedupQueue;
-    if (entry.leases.length === 0 && entry.queue.length === 0) {
-      delete state.domains[domain];
-    }
-  }
-}
-
-async function withPoolLock<T>(session: string, fn: () => Promise<T>): Promise<T> {
-  ensurePoolDirs();
-  const lockPath = getSitePoolLockPath(session);
-  const ownerPath = getSitePoolLockOwnerPath(lockPath);
-  const startedAt = Date.now();
-  const staleLockMaxAgeMs = getStaleLockMaxAgeMs();
-
-  const writeLockOwner = (): void => {
-    const owner: PoolLockOwner = { pid: process.pid, acquiredAt: Date.now() };
-    writeFileSync(ownerPath, JSON.stringify(owner), 'utf-8');
-  };
-
-  const lockOwnerPid = (): number | null => {
-    try {
-      const raw = readFileSync(ownerPath, 'utf-8');
-      const parsed = JSON.parse(raw) as Partial<PoolLockOwner>;
-      if (typeof parsed?.pid === 'number' && Number.isInteger(parsed.pid) && parsed.pid > 0) {
-        return parsed.pid;
-      }
-      return null;
-    } catch {
-      return null;
-    }
-  };
-
-  const tryRecoverStaleLock = (): boolean => {
-    try {
-      const pid = lockOwnerPid();
-      if (pid !== null && !processAlive(pid)) {
-        return true;
-      }
-      const lockStat = statSync(lockPath);
-      const ageMs = Date.now() - lockStat.mtimeMs;
-      if (ageMs > staleLockMaxAgeMs) {
-        return true;
-      }
-    } catch {
-      // ignored
-    }
-    return false;
-  };
-
-  while (true) {
-    try {
-      mkdirSync(lockPath);
-      writeLockOwner();
-      break;
-    } catch (error: any) {
-      if (error?.code !== 'EEXIST') throw error;
-      if (tryRecoverStaleLock()) {
-        try {
-          rmSync(lockPath, { recursive: true, force: true });
-        } catch {
-          // ignored
-        }
-        continue;
-      }
-      if (Date.now() - startedAt > SITE_POOL_LOCK_TIMEOUT_MS) {
-        throw new Error(`Timed out waiting for site pool lock (${session})`);
-      }
-      await sleep(SITE_POOL_RETRY_MS);
-    }
-  }
-
-  try {
-    return await fn();
-  } finally {
-    try {
-      rmSync(lockPath, { recursive: true, force: true });
-    } catch {
-      // ignored
-    }
-  }
-}
-
 export class SiteRuntime {
-  constructor(private readonly context: SiteRuntimeContext, private readonly defaultSession = 'default') {}
+  constructor(
+    private readonly context: SiteRuntimeContext,
+    private readonly defaultSession = 'default',
+    private readonly ownership?: {
+      acquireTabForOwner(ownerId: string, options?: { preferredTabId?: string; createIfMissing?: boolean; initialUrl?: string }): Promise<{ tabId: string; created: boolean }>;
+      enforceTabOwnership(ownerId: string, tabId: string): Promise<void>;
+      syncWithBrowser(): Promise<void>;
+    }
+  ) {}
 
   async execute(input: SiteActionRequest): Promise<unknown> {
     const workingDir = typeof input.workingDir === 'string' && input.workingDir.trim() ? input.workingDir.trim() : '';
@@ -379,6 +190,7 @@ export class SiteRuntime {
         argv: input.argv,
         tabId: typeof input.tabId === 'string' ? input.tabId : undefined,
         entryUrl: typeof input.entryUrl === 'string' ? input.entryUrl : undefined,
+        ownerId: typeof input.ownerId === 'string' ? input.ownerId : undefined,
         sessionId: typeof input.sessionId === 'string' && input.sessionId.trim() ? input.sessionId.trim() : this.defaultSession,
         workingDir,
       });
@@ -652,123 +464,13 @@ export class SiteRuntime {
     }
   }
 
-  private async acquireDomainTabLease(session: string, domainInput: string): Promise<SiteTabLease> {
-    const domain = domainInput.trim().toLowerCase();
-    const leaseId = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-    const maxTabs = getMaxTabsPerDomain();
-
-    const matchingDomainTabIds = (): string[] => {
-      const tabs = this.context.listTabs();
-      const matched: string[] = [];
-      for (const tab of tabs) {
-        if (!tab.url || !tab.tabId) continue;
-        try {
-          const host = new URL(tab.url).hostname;
-          if (domainMatches(host, domain)) matched.push(tab.tabId);
-        } catch {
-          // ignored
-        }
-      }
-      return matched;
-    };
-
-    while (true) {
-      let acquired: SiteTabLease | null = null;
-
-      await withPoolLock(session, async () => {
-        const state = loadPoolState(session);
-        cleanupPoolState(state);
-
-        if (!state.domains[domain]) {
-          state.domains[domain] = { queue: [], leases: [] };
-        }
-
-        const entry = state.domains[domain];
-        if (!entry.queue.includes(leaseId)) {
-          entry.queue.push(leaseId);
-        }
-
-        if (entry.queue[0] !== leaseId) {
-          savePoolState(session, state);
-          return;
-        }
-
-        const busy = new Set(entry.leases.map((lease) => lease.tabId));
-        const reusable = matchingDomainTabIds().find((tabId) => !busy.has(tabId));
-        if (reusable) {
-          entry.queue.shift();
-          entry.leases.push({
-            leaseId,
-            pid: process.pid,
-            tabId: reusable,
-            createdTemp: false,
-            acquiredAt: Date.now(),
-          });
-          savePoolState(session, state);
-          acquired = { session, domain, leaseId, tabId: reusable, createdTemp: false };
-          return;
-        }
-
-        if (entry.leases.length >= maxTabs) {
-          savePoolState(session, state);
-          return;
-        }
-
-        const tabId = await this.context.createTab(`https://${domain}`);
-        entry.queue.shift();
-        entry.leases.push({
-          leaseId,
-          pid: process.pid,
-          tabId,
-          createdTemp: true,
-          acquiredAt: Date.now(),
-        });
-        savePoolState(session, state);
-        acquired = { session, domain, leaseId, tabId, createdTemp: true };
-      });
-
-      if (acquired) return acquired;
-      await sleep(150);
-    }
-  }
-
-  private async releaseDomainTabLease(lease: SiteTabLease): Promise<void> {
-    await withPoolLock(lease.session, async () => {
-      const state = loadPoolState(lease.session);
-      cleanupPoolState(state);
-      const entry = state.domains[lease.domain];
-      if (!entry) {
-        savePoolState(lease.session, state);
-        return;
-      }
-
-      const index = entry.leases.findIndex((item) => item.leaseId === lease.leaseId);
-      if (index === -1) {
-        savePoolState(lease.session, state);
-        return;
-      }
-
-      const current = entry.leases[index];
-      if (current.createdTemp && current.tabId) {
-        await this.context.closeTab(current.tabId).catch(() => undefined);
-      }
-
-      entry.leases.splice(index, 1);
-      entry.queue = entry.queue.filter((item) => item !== lease.leaseId);
-      if (entry.leases.length === 0 && entry.queue.length === 0) {
-        delete state.domains[lease.domain];
-      }
-
-      savePoolState(lease.session, state);
-    });
-  }
-
   private async runSiteAdapter(input: {
     name: string;
     args?: Record<string, unknown>;
     argv?: string[];
     tabId?: string;
     entryUrl?: string;
+    ownerId?: string;
     sessionId: string;
     workingDir: string;
   }): Promise<unknown> {
@@ -797,43 +499,74 @@ export class SiteRuntime {
     const script = this.buildAdapterScript(site.filePath, argMap);
 
     let targetTabId = input.tabId;
-    let managedLease: SiteTabLease | null = null;
+    const ownerId = typeof input.ownerId === 'string' ? input.ownerId.trim() : '';
 
-    try {
-      if (!targetTabId && site.domain) {
-        managedLease = await this.acquireDomainTabLease(input.sessionId, site.domain);
-        targetTabId = managedLease.tabId;
-      }
-
-      if (!targetTabId) {
-        throw new Error('Missing tabId for site run. Provide tabId or use an adapter with domain.');
-      }
-
-      await this.context.activateTab(targetTabId);
-      if (targetUrl) {
-        await this.context.navigateTab(targetTabId, targetUrl);
-      }
-
-      const raw = await this.context.executeScriptInTab(targetTabId, script);
-      const parsed = this.parseMaybeJson(raw);
-
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        const data = parsed as Record<string, unknown>;
-        if (typeof data.error === 'string') {
-          const hint = typeof data.hint === 'string' ? data.hint : undefined;
-          throw new Error(hint ? `${data.error}\nHint: ${hint}` : data.error);
+    if (this.ownership) {
+      await this.ownership.syncWithBrowser();
+      if (ownerId) {
+        const initialUrl = targetUrl || (site.domain ? `https://${site.domain.trim().toLowerCase()}` : undefined);
+        const acquired = await this.ownership.acquireTabForOwner(ownerId, {
+          preferredTabId: targetTabId,
+          createIfMissing: true,
+          initialUrl,
+        });
+        targetTabId = acquired.tabId;
+      } else if (targetTabId) {
+        // Manual site runs without owner can still target an unowned tab.
+      } else {
+        const tabs = this.context.listTabs();
+        const byDomain = targetUrl
+          ? tabs.find((tab) => {
+              try {
+                const host = new URL(tab.url).hostname;
+                return site.domain ? domainMatches(host, site.domain) : true;
+              } catch {
+                return false;
+              }
+            })
+          : tabs[0];
+        if (byDomain?.tabId) {
+          targetTabId = byDomain.tabId;
         }
       }
+    }
 
-      return {
-        adapter: site.name,
-        tabId: targetTabId,
-        data: parsed ?? null,
-      };
-    } finally {
-      if (managedLease) {
-        await this.releaseDomainTabLease(managedLease).catch(() => undefined);
+    if (!targetTabId && site.domain) {
+      const created = await this.context.createTab(`https://${site.domain.trim().toLowerCase()}`);
+      targetTabId = created;
+      if (this.ownership && ownerId) {
+        await this.ownership.enforceTabOwnership(ownerId, targetTabId);
       }
     }
+
+    if (!targetTabId) {
+      throw new Error('Missing tabId for site run. Provide tabId or run inside pipeline context.');
+    }
+
+    if (this.ownership && ownerId) {
+      await this.ownership.enforceTabOwnership(ownerId, targetTabId);
+    }
+
+    await this.context.activateTab(targetTabId);
+    if (targetUrl) {
+      await this.context.navigateTab(targetTabId, targetUrl);
+    }
+
+    const raw = await this.context.executeScriptInTab(targetTabId, script);
+    const parsed = this.parseMaybeJson(raw);
+
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      const data = parsed as Record<string, unknown>;
+      if (typeof data.error === 'string') {
+        const hint = typeof data.hint === 'string' ? data.hint : undefined;
+        throw new Error(hint ? `${data.error}\nHint: ${hint}` : data.error);
+      }
+    }
+
+    return {
+      adapter: site.name,
+      tabId: targetTabId,
+      data: parsed ?? null,
+    };
   }
 }

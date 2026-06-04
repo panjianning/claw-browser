@@ -73,6 +73,7 @@ export function errorResponse(id: string, error: string): any {
 export async function executeCommand(cmd: any, state: DaemonState): Promise<any> {
   const action = cmd.action || '';
   const id = cmd.id || '';
+  const ownerId = typeof cmd.ownerId === 'string' ? cmd.ownerId.trim() : '';
   const isWaitAction = WAIT_ACTIONS.has(action);
   let launchWarning: string | undefined;
 
@@ -182,6 +183,22 @@ export async function executeCommand(cmd: any, state: DaemonState): Promise<any>
     // Ensure at least one page exists
     if (state.browser && state.browser.pageCount?.() === 0) {
       await state.browser.ensurePage?.();
+    }
+  }
+
+  if (ownerId.length > 0) {
+    await state.tabOwnership.syncWithBrowser();
+    if (typeof cmd.tabId === 'string' && cmd.tabId.trim().length > 0) {
+      try {
+        await state.tabOwnership.enforceTabOwnership(ownerId, cmd.tabId);
+      } catch (error: any) {
+        return errorResponse(id, error?.message || String(error));
+      }
+    } else {
+      const boundTab = state.tabOwnership.getOwnerRootTab(ownerId);
+      if (boundTab) {
+        cmd.tabId = boundTab;
+      }
     }
   }
 
@@ -650,19 +667,38 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
             },
             executeScriptInTab: async (tabId: string, script: string) => {
               if (!state.browser) throw new Error('Browser not launched');
-              const result = await routeAction('evaluate', { id, action: 'evaluate', tabId, script }, state);
+              const result = await executeCommand(
+                {
+                  id: `site-eval-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  action: 'evaluate',
+                  tabId,
+                  script,
+                },
+                state
+              );
               if (!result?.success) {
                 throw new Error(result?.error || 'Failed to execute script in tab');
               }
               return result?.data?.result;
             },
           },
-          state.sessionId
+          state.sessionId,
+          state.tabOwnership
         );
       }
 
       if (!state.pipelineRuntime) {
         state.pipelineRuntime = new PipelineRuntime({
+          acquireRunTab: async (input: { ownerId: string; preferredTabId?: string; initialUrl?: string }) => {
+            return state.tabOwnership.acquireTabForOwner(input.ownerId, {
+              preferredTabId: input.preferredTabId,
+              createIfMissing: true,
+              initialUrl: input.initialUrl,
+            });
+          },
+          releaseRunOwner: async (ownerId: string) => {
+            await state.tabOwnership.releaseOwner(ownerId, { closeOwnedTabs: false });
+          },
           executeSiteAction: async (input: any) => {
             return await state.siteRuntime.execute(input);
           },
@@ -671,6 +707,7 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
             tabId?: string;
             workingDir?: string;
             sessionId?: string;
+            ownerId?: string;
             params?: Record<string, unknown>;
           }) => {
             const forbidden = String(input.action || '').trim().toLowerCase();
@@ -687,6 +724,9 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
               action: input.action,
               ...(input.tabId ? { tabId: input.tabId } : {}),
             };
+            if (typeof input.ownerId === 'string' && input.ownerId.trim()) {
+              browserCmd.ownerId = input.ownerId.trim();
+            }
             if (input.params && typeof input.params === 'object') {
               for (const [key, value] of Object.entries(input.params)) {
                 browserCmd[key] = value;
@@ -787,7 +827,8 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
               return result?.data?.result;
             },
           },
-          state.sessionId
+          state.sessionId,
+          state.tabOwnership
         );
       }
 
@@ -796,6 +837,11 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
         if (!siteAction) {
           return errorResponse(id, 'Missing siteAction');
         }
+
+        const autoOwnerId =
+          siteAction === 'run' && (!cmd.ownerId || String(cmd.ownerId).trim().length === 0)
+            ? `site-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+            : '';
 
         if (siteAction === 'run') {
           const needsLaunch = !state.browser || !(await state.browser.isConnectionAlive?.());
@@ -810,13 +856,20 @@ async function routeAction(action: string, cmd: any, state: DaemonState): Promis
             ? (cmd.args as Record<string, unknown>)
             : {};
 
-        const result = await state.siteRuntime.execute({
-          action: siteAction,
-          ...args,
-          workingDir: typeof cmd.workingDir === 'string' ? cmd.workingDir : process.cwd(),
-          sessionId: typeof cmd.sessionId === 'string' ? cmd.sessionId : state.sessionId,
-        });
-        return successResponse(id, result);
+        try {
+          const result = await state.siteRuntime.execute({
+            action: siteAction,
+            ...args,
+            workingDir: typeof cmd.workingDir === 'string' ? cmd.workingDir : process.cwd(),
+            sessionId: typeof cmd.sessionId === 'string' ? cmd.sessionId : state.sessionId,
+            ownerId: autoOwnerId || (typeof cmd.ownerId === 'string' ? cmd.ownerId : undefined),
+          });
+          return successResponse(id, result);
+        } finally {
+          if (autoOwnerId) {
+            await state.tabOwnership.releaseOwner(autoOwnerId, { closeOwnedTabs: false }).catch(() => undefined);
+          }
+        }
       } catch (error: any) {
         return errorResponse(id, error?.message || String(error));
       }
