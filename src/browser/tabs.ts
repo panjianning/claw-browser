@@ -186,21 +186,25 @@ export async function handleTabClose(cmd: any, state: DaemonState): Promise<any>
       throw new Error(`OwnerConflict: tab ${targetId} is not owned by ${ownerId}`);
     }
   };
+  let closedTabId: string | null = null;
   try {
     if (target.tabId) {
       const resolved = resolveTabTargetId(mgr, target.tabId);
       assertOwner(resolved);
       await mgr.closePage(resolved);
+      closedTabId = resolved;
     } else if (target.label) {
       const resolved = resolveTabTargetId(mgr, target.label);
       assertOwner(resolved);
       await mgr.closePage(resolved);
+      closedTabId = resolved;
     } else if (typeof target.index === 'number') {
       const pages = mgr.getPages?.() || [];
       const page = pages[target.index];
       if (!page?.targetId) throw new Error('Tab not found');
       assertOwner(page.targetId);
       await mgr.closePageByIndex(target.index);
+      closedTabId = page.targetId;
     } else {
       const active = mgr.getActivePage();
       if (!active) {
@@ -208,9 +212,14 @@ export async function handleTabClose(cmd: any, state: DaemonState): Promise<any>
       }
       assertOwner(active.targetId);
       await mgr.closePage(active.targetId);
+      closedTabId = active.targetId;
     }
   } catch (error: any) {
     return { id, success: false, error: error?.message || 'Tab not found' };
+  }
+
+  if (closedTabId) {
+    state.tabOwnership.removeTabOwnership(closedTabId);
   }
 
   const active = mgr.getActivePage();

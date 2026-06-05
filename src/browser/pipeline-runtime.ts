@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 import type { SiteActionRequest } from './site-runtime.js';
 
 type PipelineSource = 'local' | 'community';
-type PipelineStepType = 'site' | 'browser' | 'module' | 'artifact' | 'log';
+type PipelineStepType = 'site' | 'browser' | 'module' | 'pipeline' | 'artifact' | 'log';
 type RunStatus = 'running' | 'completed' | 'failed' | 'canceled';
 type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled';
 type StatusDetailLevel = 'compact' | 'full';
@@ -88,6 +88,9 @@ type PipelineCodeContext = {
   };
   module: {
     run: (moduleRef: string, input?: Record<string, unknown>) => Promise<Record<string, unknown>>;
+  };
+  pipeline: {
+    run: (name: string, input?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   };
   artifact: {
     write: (
@@ -711,6 +714,33 @@ export class PipelineRuntime {
               throw new Error(`module "${moduleRef}" must return a plain object`);
             }
             finishStep(step, 'completed', { summary: `module: ${moduleRef}` });
+            return result;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : String(error);
+            finishStep(step, run.cancelRequested ? 'canceled' : 'failed', { error: message });
+            throw error;
+          }
+        },
+      },
+      pipeline: {
+        run: async (name, input) => {
+          assertActive();
+          const step = beginStep('pipeline', name);
+          try {
+            const loaded = await this.getPipelineByName(name, run.callerWorkingDir);
+            if (!loaded) throw new Error(`pipeline "${name}" not found`);
+            const subInput = (input && typeof input === 'object' && !Array.isArray(input)) ? input : {};
+            const mergedInput = this.resolveInput(loaded.meta, { ...run.input, ...subInput });
+            // Sub-pipeline shares parent's tabId, ownerId, sessionId
+            const subCtx = this.createCodePipelineContext(
+              { ...run, input: mergedInput },
+              workDir,
+            );
+            const result = await loaded.run(subCtx);
+            if (!result || typeof result !== 'object' || Array.isArray(result)) {
+              throw new Error(`pipeline "${name}" must return a plain object`);
+            }
+            finishStep(step, 'completed', { summary: `pipeline: ${name}` });
             return result;
           } catch (error) {
             const message = error instanceof Error ? error.message : String(error);

@@ -220,6 +220,26 @@ export class TabOwnershipManager {
     this.touchOwner(ownerId);
   }
 
+  removeTabOwnership(tabIdInput: string): void {
+    const tabId = tabIdInput.trim();
+    if (!tabId) return;
+    const rec = this.ownership.get(tabId);
+    if (!rec) return;
+    this.ownership.delete(tabId);
+
+    // If the removed tab was the owner's root, find a fallback or clear the root entry.
+    const rootTabId = this.ownerRoots.get(rec.ownerId);
+    if (rootTabId === tabId) {
+      this.ownerRoots.delete(rec.ownerId);
+      for (const [otherTabId, otherRec] of this.ownership.entries()) {
+        if (otherRec.ownerId === rec.ownerId) {
+          this.ownerRoots.set(rec.ownerId, otherTabId);
+          break;
+        }
+      }
+    }
+  }
+
   async releaseOwner(ownerIdInput: string, options: ReleaseOwnerOptions = {}): Promise<void> {
     const ownerId = ownerIdInput.trim();
     if (!ownerId) return;
