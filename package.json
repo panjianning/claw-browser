@@ -4,7 +4,7 @@
   "description": "Fast browser automation CLI for AI agents (TypeScript port)",
   "type": "module",
   "bin": {
-    "claw-browser": "./dist/index.js"
+    "claw-browser": "dist/index.js"
   },
   "scripts": {
     "build": "tsup",
