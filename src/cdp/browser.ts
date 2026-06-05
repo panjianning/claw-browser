@@ -352,7 +352,7 @@ export class BrowserManager {
 
   public async navigate(
     url: string,
-    waitUntil: WaitUntil = WaitUntil.Load,
+    waitUntil: WaitUntil = WaitUntil.DomContentLoaded,
     sessionIdOverride?: string
   ): Promise<any> {
     return this.withSessionRecovery(async () => {

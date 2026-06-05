@@ -42,7 +42,7 @@ export async function handleNavigate(cmd: any, state: DaemonState): Promise<any>
     return { id, success: false, error: 'Browser not launched' };
   }
 
-  const waitUntilValue = cmd.waitUntil || 'load';
+  const waitUntilValue = cmd.waitUntil || 'domcontentloaded';
 
   // Origin-scoped header injection
   const sessionId = commandSessionId(cmd, mgr);

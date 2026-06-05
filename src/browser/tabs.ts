@@ -130,23 +130,31 @@ export async function handleTabSwitch(cmd: any, state: DaemonState): Promise<any
       throw new Error(`OwnerConflict: tab ${targetId} is not owned by ${ownerId}`);
     }
   };
+  let resolvedTargetId: string | null = null;
   try {
     if (target.tabId) {
       const resolved = resolveTabTargetId(mgr, target.tabId);
       assertOwner(resolved);
       mgr.setActivePageByTargetId(resolved);
+      resolvedTargetId = resolved;
     } else if (target.label) {
       const resolved = resolveTabTargetId(mgr, target.label);
       assertOwner(resolved);
       mgr.setActivePageByTargetId(resolved);
+      resolvedTargetId = resolved;
     } else if (typeof target.index === 'number') {
       const pages = mgr.getPages?.() || [];
       const page = pages[target.index];
       if (!page?.targetId) throw new Error('Tab not found');
       assertOwner(page.targetId);
       mgr.setActivePage(target.index);
+      resolvedTargetId = page.targetId;
     } else {
       return { id, success: false, error: 'Missing tab target. Use tab <label|tab-id>' };
+    }
+    // Bring the tab to the foreground in the browser window
+    if (resolvedTargetId) {
+      await mgr.client.sendCommand('Target.activateTarget', { targetId: resolvedTargetId });
     }
   } catch (error: any) {
     return { id, success: false, error: error?.message || 'Tab not found' };
