@@ -43,8 +43,6 @@ function printPipelineHelp(jsonMode: boolean): void {
     '  claw-browser pipeline cancel <runId>',
     '  claw-browser pipeline runs [--pipeline <name>] [--status <status>] [--limit <n>] [--offset <n>] [--full]',
     '  claw-browser pipeline rerun <runId> [--wait] [--workdir <path>] [--full]',
-    '  claw-browser pipeline modules [query]',
-    '  claw-browser pipeline module-info <name>',
     '',
     'Input shortcuts:',
     '  Any unknown --key value in `pipeline run` is treated as input field (for example: --keyword abc).',
@@ -380,21 +378,6 @@ export async function runPipelineCli(args: string[], opts: PipelineCliOptions): 
     if (workDir) payload.workDir = workDir;
 
     const result = await executePipelineAction('rerun', payload, opts);
-    printValue(opts.jsonMode, readDataEnvelope(result));
-    return;
-  }
-
-  if (sub === 'modules') {
-    const query = String(rest[0] || '').trim();
-    const result = await executePipelineAction('modules', query ? { query } : {}, opts);
-    printValue(opts.jsonMode, readDataEnvelope(result));
-    return;
-  }
-
-  if (sub === 'module_info') {
-    const name = String(rest[0] || '').trim();
-    if (!name) throw new Error('Usage: claw-browser pipeline module-info <name>');
-    const result = await executePipelineAction('module_info', { name }, opts);
     printValue(opts.jsonMode, readDataEnvelope(result));
     return;
   }

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 import type { SiteActionRequest } from './site-runtime.js';
 
 type PipelineSource = 'local' | 'community';
-type PipelineStepType = 'site' | 'browser' | 'module' | 'pipeline' | 'artifact' | 'log';
+type PipelineStepType = 'site' | 'browser' | 'pipeline' | 'artifact' | 'log';
 type RunStatus = 'running' | 'completed' | 'failed' | 'canceled';
 type StepStatus = 'pending' | 'running' | 'completed' | 'failed' | 'canceled';
 type StatusDetailLevel = 'compact' | 'full';
@@ -86,9 +86,6 @@ type PipelineCodeContext = {
   site: {
     run: (name: string, args?: Record<string, unknown>) => Promise<unknown>;
   };
-  module: {
-    run: (moduleRef: string, input?: Record<string, unknown>) => Promise<Record<string, unknown>>;
-  };
   pipeline: {
     run: (name: string, input?: Record<string, unknown>) => Promise<Record<string, unknown>>;
   };
@@ -107,12 +104,7 @@ type PipelineCodeContext = {
       }
     ) => Promise<unknown>;
   };
-};
-
-type PipelineModuleContext = {
-  workDir: string;
   utils: {
-    log: (message: string) => void;
     runCommand: (
       command: string,
       args?: string[],
@@ -144,27 +136,9 @@ type CodePipelineModule = {
   };
 };
 
-type CodeModuleMeta = {
-  name?: string;
-  description?: string;
-  input?: Record<string, unknown>;
-  output?: Record<string, unknown>;
-};
-
 type LoadedPipeline = {
   meta: PipelineMeta;
   run: (ctx: PipelineCodeContext) => Promise<Record<string, unknown>>;
-};
-
-type LoadedModule = {
-  run: (input: Record<string, unknown>, context: PipelineModuleContext) => Promise<Record<string, unknown>>;
-};
-
-type ModuleEntry = {
-  name: string;
-  filePath: string;
-  source: 'community' | 'local';
-  meta: CodeModuleMeta;
 };
 
 type SiteListItem = {
@@ -284,45 +258,6 @@ export class PipelineRuntime {
         .sort((a, b) => (b.endedAt || Date.now()) - (a.endedAt || Date.now()))
         .slice(offset, offset + limit);
       return runs.map((run) => this.toRunStatus(run, detail));
-    }
-
-    if (action === 'modules') {
-      const query = String(input.args?.query || '').trim().toLowerCase();
-      const workingDir = this.resolveWorkingDir(input.workingDir);
-      const modules = await this.getAllModules(workingDir);
-      return modules
-        .filter((item) => {
-          if (!query) return true;
-          return (
-            item.name.toLowerCase().includes(query) ||
-            String(item.meta.description || '')
-              .toLowerCase()
-              .includes(query)
-          );
-        })
-        .map((item) => ({
-          name: item.name,
-          description: String(item.meta.description || ''),
-          source: item.source,
-          filePath: item.filePath,
-        }));
-    }
-
-    if (action === 'module_info') {
-      const name = String(input.args?.name || '').trim();
-      if (!name) throw new Error('pipeline module_info requires args.name');
-      const workingDir = this.resolveWorkingDir(input.workingDir);
-      const modules = await this.getAllModules(workingDir);
-      const moduleInfo = modules.find((item) => item.name === name);
-      if (!moduleInfo) throw new Error(`module "${name}" not found`);
-      return {
-        name: moduleInfo.name,
-        description: String(moduleInfo.meta.description || ''),
-        source: moduleInfo.source,
-        filePath: moduleInfo.filePath,
-        input: moduleInfo.meta.input && typeof moduleInfo.meta.input === 'object' ? moduleInfo.meta.input : {},
-        output: moduleInfo.meta.output && typeof moduleInfo.meta.output === 'object' ? moduleInfo.meta.output : {},
-      };
     }
 
     if (action === 'logs') {
@@ -703,25 +638,6 @@ export class PipelineRuntime {
           }
         },
       },
-      module: {
-        run: async (moduleRef, moduleInput) => {
-          assertActive();
-          const step = beginStep('module', moduleRef);
-          try {
-            const loaded = await this.loadModuleByRef(moduleRef, run.callerWorkingDir);
-            const result = await loaded.run(moduleInput || {}, this.createModuleContext(run, workDir, step.id));
-            if (!result || typeof result !== 'object' || Array.isArray(result)) {
-              throw new Error(`module "${moduleRef}" must return a plain object`);
-            }
-            finishStep(step, 'completed', { summary: `module: ${moduleRef}` });
-            return result;
-          } catch (error) {
-            const message = error instanceof Error ? error.message : String(error);
-            finishStep(step, run.cancelRequested ? 'canceled' : 'failed', { error: message });
-            throw error;
-          }
-        },
-      },
       pipeline: {
         run: async (name, input) => {
           assertActive();
@@ -785,19 +701,10 @@ export class PipelineRuntime {
           }
         },
       },
-    };
-  }
 
-  private createModuleContext(run: PipelineRunState, workDir: string, stepId: string): PipelineModuleContext {
-    return {
-      workDir,
       utils: {
-        log: (message: string): void => {
-          this.appendRunLog(run, `[module] ${message}`);
-          this.appendStepLog(run, stepId, `[module] ${message}`);
-        },
         runCommand: async (command, args, options) => {
-          return this.runCommandInModule(run, command, args || [], options);
+          return this.runCommandInPipeline(run, command, args || [], options);
         },
         resolvePath: (relativePath) => this.resolveInsideWorkDir(workDir, relativePath),
         readText: (relativePath) => {
@@ -821,10 +728,13 @@ export class PipelineRuntime {
           return path;
         },
       },
+
     };
   }
 
-  private async runCommandInModule(
+
+
+  private async runCommandInPipeline(
     run: PipelineRunState,
     command: string,
     args: string[],
@@ -1162,114 +1072,4 @@ export class PipelineRuntime {
     return `run_${time}_${rand}`;
   }
 
-  private async getAllModules(workingDir: string): Promise<ModuleEntry[]> {
-    const roots: Array<{ dir: string; source: 'community' | 'local' }> = [
-      { dir: join(homedir(), '.claw-browser', 'modules', 'community'), source: 'community' },
-      { dir: join(homedir(), '.claw-browser', 'modules', 'local'), source: 'local' },
-      { dir: join(workingDir, '.claw-browser', 'modules'), source: 'local' },
-    ];
-
-    const byName = new Map<string, ModuleEntry>();
-    for (const root of roots) {
-      const entries = await this.scanModules(root.dir, root.source, root.dir);
-      for (const entry of entries) {
-        byName.set(entry.name, entry);
-      }
-    }
-
-    return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
-  }
-
-  private async scanModules(
-    dir: string,
-    source: 'community' | 'local',
-    sourceRoot: string
-  ): Promise<ModuleEntry[]> {
-    if (!existsSync(dir)) return [];
-    const modules: ModuleEntry[] = [];
-
-    const walk = async (currentDir: string): Promise<void> => {
-      let entries: import('fs').Dirent[] = [];
-      try {
-        entries = readdirSync(currentDir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-
-      for (const entry of entries) {
-        const fullPath = join(currentDir, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name.startsWith('.')) continue;
-          await walk(fullPath);
-          continue;
-        }
-        if (!entry.isFile() || !entry.name.endsWith('.module.mjs')) continue;
-
-        const parsed = await this.parseModuleMeta(fullPath, source, sourceRoot);
-        if (parsed) modules.push(parsed);
-      }
-    };
-
-    await walk(dir);
-    return modules;
-  }
-
-  private async parseModuleMeta(
-    filePath: string,
-    source: 'community' | 'local',
-    sourceRoot: string
-  ): Promise<ModuleEntry | null> {
-    try {
-      const imported = await this.importFreshModule<{
-        default?: unknown;
-        meta?: CodeModuleMeta;
-      }>(filePath);
-      if (typeof imported.default !== 'function') return null;
-      const rel = filePath
-        .slice(sourceRoot.length)
-        .replace(/^[/\\]/, '')
-        .replace(/\\/g, '/');
-      return {
-        name:
-          typeof imported.meta?.name === 'string' && imported.meta.name.trim()
-            ? imported.meta.name.trim()
-            : rel,
-        filePath,
-        source,
-        meta: imported.meta || {},
-      };
-    } catch {
-      return null;
-    }
-  }
-
-  private async loadModuleByRef(moduleRef: string, workingDir: string): Promise<LoadedModule> {
-    const ref = String(moduleRef || '').trim();
-    if (!ref) throw new Error('module ref is required');
-
-    const candidates = [
-      join(workingDir, '.claw-browser', 'modules'),
-      join(homedir(), '.claw-browser', 'modules', 'local'),
-      join(homedir(), '.claw-browser', 'modules', 'community'),
-    ];
-
-    const normalizedRef = ref.endsWith('.module.mjs') ? ref : `${ref}.module.mjs`;
-
-    for (const root of candidates) {
-      const candidatePath = isAbsolute(normalizedRef) ? normalizedRef : resolve(root, normalizedRef);
-      if (!existsSync(candidatePath) || !statSync(candidatePath).isFile()) continue;
-
-      const imported = await this.importFreshModule<{
-        default?: (input: Record<string, unknown>, context: PipelineModuleContext) => Promise<Record<string, unknown>>;
-      }>(candidatePath);
-
-      if (!imported || typeof imported.default !== 'function') {
-        throw new Error(`module "${moduleRef}" missing default export function`);
-      }
-
-      return { run: imported.default };
-    }
-
-    throw new Error(`module "${moduleRef}" not found`);
-  }
 }
